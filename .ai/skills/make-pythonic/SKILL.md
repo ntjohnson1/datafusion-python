@@ -27,7 +27,7 @@ argument-hint: [scope] (e.g., "string functions", "datetime functions", "array f
 
 You are improving the datafusion-python API to feel more natural to Python users. The goal is to allow functions to accept native Python types (int, float, str, bool, etc.) for arguments that are contextually always or typically literal values, instead of requiring users to manually wrap them in `lit()`.
 
-**Core principle:** A Python user should be able to write `split_part(col("a"), ",", 2)` instead of `split_part(col("a"), lit(","), lit(2))` when the arguments are contextually obvious literals.
+**Core principle:** A Python user should be able to write `split_part("a", ",", 2)` instead of `split_part(col("a"), lit(","), lit(2))` — a string is a column name where the argument holds data, and a literal where it holds a fixed scalar.
 
 ## Scope: `functions` vs `functions.spark`
 
@@ -47,8 +47,8 @@ Compatibility rules for the spark namespace:
   positional pyspark calls.
 - **Type unions may widen the input set, never narrow it.** Pyspark
   accepts `Column` or `str` (column name) for most args; we accept
-  `Expr` already, and widening to `Expr | int` / `Expr | str` for
-  literal-friendly arguments is on-brand because the int/str case is
+  `Expr | str` already, and widening to `Expr | int` for
+  literal-friendly arguments is on-brand because the int case is
   exactly what a pyspark caller would also try. Just verify the widened
   set is a superset of what pyspark accepts for that arg.
 - **Extra keyword arguments are allowed** as long as they default to
@@ -59,10 +59,8 @@ Compatibility rules for the spark namespace:
 Practical effect: in `functions.spark`, apply Categories A and (where
 pyspark exposes the same arg as a non-`Expr`) B normally, but cross-check
 each proposed signature against `pyspark.sql.functions` before landing
-it. When pyspark's own type hint is `Column | str` for a "column name"
-arg, prefer leaving the spark wrapper at `Expr` — Category C
-("`Expr | str` meaning column name") is unusual in `functions.py` and
-should remain so in `functions.spark`.
+it. Category C needs no cross-check: pyspark's own type hint for a data
+argument is `Column | str`, so `Expr | str` matches it exactly.
 
 ## How to Identify Candidates
 
@@ -321,22 +319,44 @@ def concat_ws(separator: str, *args: Expr) -> Expr:
 
 ### Category C: Arguments That Should Accept str as Column Name
 
-In some contexts a string argument naturally refers to a column name rather than a literal. This is the pattern used by DataFrame methods.
+Arguments that hold the **data being operated on** take a string as a column
+name. DataFrame methods, `functions.py` and `functions/spark.py` all follow this
+pattern.
 
 **Type hint pattern:** `Expr | str`
 
-**When to use:** Only when the string contextually means a column name (rare in `functions.py`, more common in DataFrame methods).
+**When to use:** Whenever the argument is the data itself — `expression` in
+`sum`, `arg` in `abs`, `array` in `array_sort`, `filter` in any aggregate, and
+every `*args: Expr` variadic.
 
 ```python
 # Use _to_raw_expr() from expr.py for this pattern
-from datafusion.expr import _to_raw_expr
+from datafusion.expr import _to_raw_expr, _to_raw_expr_list, _to_raw_expr_or_none
 
-def some_function(column: Expr | str) -> Expr:
-    raw = _to_raw_expr(column)  # str -> col(str)
-    return Expr(f.some_function(raw))
+def sum(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
+    return Expr(f.sum(_to_raw_expr(expression), filter=_to_raw_expr_or_none(filter)))
+
+
+def coalesce(*args: Expr | str) -> Expr:
+    return Expr(f.coalesce(_to_raw_expr_list(args)))
 ```
 
-**IMPORTANT:** In `functions.py`, string arguments almost never mean column names. Functions operate on expressions, and column references should use `col()`. Category C applies mainly to DataFrame methods and context APIs, not to scalar/aggregate/window functions. Do NOT convert string arguments to column expressions in `functions.py` unless there is a very clear reason to do so.
+**Category A or Category C?** Ask what the argument *is*, not what type it has:
+
+- It holds the data → Category C, `str` means a column name.
+- It holds a fixed scalar that configures the operation (a delimiter, a format,
+  a count, a date part) → Category A, `str` means a literal.
+
+Both meanings coexist within one call, which is how pyspark behaves too:
+`array_to_string("tags", ",")` joins column `tags` with the literal `,`.
+
+**Neither category** fits an argument holding a *value compared against the
+data* — `element` in `array_append`, `from_val`/`to_val` in `array_replace`,
+`key` in `map_extract`, `then` in `when`. A string there reads naturally as a
+literal but sits in a data position, so these stay `Expr`-only and the caller
+stays explicit. `VALUE_LIKE_ARGS` in `python/tests/test_functions.py` holds the
+full list; `test_data_args_accept_column_names` fails if a function grows an
+`Expr`-only argument that is not on it.
 
 ## Implementation Steps
 
@@ -430,9 +450,7 @@ from datafusion.expr import coerce_to_expr, coerce_to_expr_or_none
 
 ## What NOT to Change
 
-- **Do not change arguments that represent data columns.** If an argument is the primary data being operated on (e.g., the `string` in `left(string, n)` or the `array` in `array_sort(array)`), it should remain `Expr` only. Users should use `col()` for column references.
-- **Do not change variadic `*args: Expr` parameters.** These represent multiple expressions and should stay as `Expr`.
-- **Do not change arguments where the coercion is ambiguous.** If it is unclear whether a string should be a column name or a literal, leave it as `Expr` and let the user be explicit.
+- **Do not change arguments where the coercion is ambiguous.** If it is unclear whether a string should be a column name or a literal, leave it as `Expr` and let the user be explicit. Add it to `VALUE_LIKE_ARGS` in `python/tests/test_functions.py` with a note on why.
 - **Do not add coercion logic to simple aliases.** If a function is just `return other_function(...)`, the primary function handles coercion. However, you **must update the alias's type hints** to match the primary function's signature so that type checkers and documentation accurately reflect what the alias accepts.
 - **Do not change the Rust bindings.** All coercion happens in the Python layer. The Rust functions continue to accept `PyExpr`.
 
