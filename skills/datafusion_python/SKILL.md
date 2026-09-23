@@ -363,6 +363,22 @@ lit(pa.scalar(value))            # PyArrow scalar (preserves Arrow type)
 `lit()` accepts PyArrow scalars directly -- prefer this over converting Arrow
 data to Python and back when working with values extracted from query results.
 
+Functions in `F` read a plain string as a column name wherever they take the
+data to operate on, so `col()` is optional there. It can still be used to reduce
+ambiguity:
+
+```python
+F.sum("price")                   # same as F.sum(col("price"))
+F.coalesce("a", "b")             # same as F.coalesce(col("a"), col("b"))
+F.count("price", filter="paid")  # filter is a boolean column
+```
+
+Arguments holding a fixed scalar rather than data read a string as a literal, so
+`F.array_to_string("tags", ",")` joins column `tags` with a comma. A few
+arguments compare a value against the data -- `element` in `F.array_append`,
+`from_val`/`to_val` in `F.array_replace`, `key` in `F.map_extract` -- and still
+need an explicit `lit()` or `col()`.
+
 ### Arithmetic
 
 ```python
