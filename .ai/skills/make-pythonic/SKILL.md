@@ -447,27 +447,33 @@ python -m pytest python/tests/test_functions.py -v
 | Helper | Argument holds | A bare `str` becomes |
 | --- | --- | --- |
 | `coerce_to_column` | the data being operated on | a column reference |
-| `coerce_to_expr` | a fixed scalar | a literal |
+| `coerce_to_literal` | a fixed scalar | a literal |
 | `ensure_expr` | a value compared against the data | a `TypeError` |
 
-Each has `_or_none` and `_list` variants for optional and variadic parameters.
-`coerce_to_column` and `ensure_expr` return the raw internal expression;
-`coerce_to_expr` returns an `Expr`, so it still needs `.expr` at the call.
+The three names sit on one axis — column, literal, neither — so the name you
+pick *is* the category you decided on. Each has `_or_none` and `_list` variants
+for optional and variadic parameters, and all of them return the raw internal
+expression, ready to hand straight to the binding. Nothing needs `.expr` at the
+call site.
 
-**For required parameters** use `coerce_to_expr`:
+**For required parameters** use `coerce_to_literal`:
 
 ```python
-from datafusion.expr import coerce_to_column, coerce_to_expr
+from datafusion.expr import coerce_to_column, coerce_to_literal
 
 def left(string: Expr | str, n: Expr | int) -> Expr:
-    n = coerce_to_expr(n)
-    return Expr(f.left(coerce_to_column(string), n.expr))
+    return Expr(f.left(coerce_to_column(string), coerce_to_literal(n)))
 ```
 
-**For optional nullable parameters** use `coerce_to_expr_or_none`:
+**For optional nullable parameters** use `coerce_to_literal_or_none`, which
+passes `None` through so the binding receives it unchanged:
 
 ```python
-from datafusion.expr import coerce_to_column, coerce_to_expr, coerce_to_expr_or_none
+from datafusion.expr import (
+    coerce_to_column,
+    coerce_to_literal,
+    coerce_to_literal_or_none,
+)
 
 def regexp_count(
     string: Expr | str,
@@ -475,15 +481,12 @@ def regexp_count(
     start: Expr | int | None = None,
     flags: Expr | str | None = None,
 ) -> Expr:
-    pattern = coerce_to_expr(pattern)
-    start = coerce_to_expr_or_none(start)
-    flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_count(
             coerce_to_column(string),
-            pattern.expr,
-            start.expr if start is not None else None,
-            flags.expr if flags is not None else None,
+            coerce_to_literal(pattern),
+            coerce_to_literal_or_none(start),
+            coerce_to_literal_or_none(flags),
         )
     )
 ```
@@ -491,8 +494,12 @@ def regexp_count(
 All of them are defined in `python/datafusion/expr.py`. Import what the signature needs:
 
 ```python
-from datafusion.expr import coerce_to_column, coerce_to_expr, coerce_to_expr_or_none
+from datafusion.expr import coerce_to_column, coerce_to_literal, coerce_to_literal_or_none
 ```
+
+`coerce_to_expr`, `coerce_to_expr_or_none` and `coerce_to_expr_list` are the
+pre-rename names. They still work and still return an `Expr`, but they warn —
+do not reach for them in new code.
 
 ## What NOT to Change
 

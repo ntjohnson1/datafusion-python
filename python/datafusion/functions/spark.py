@@ -40,30 +40,35 @@ from datafusion.expr import (
     coerce_to_column,
     coerce_to_column_list,
     coerce_to_column_or_none,
-    coerce_to_expr,
+    coerce_to_literal,
     sort_list_to_raw_sort_list,
 )
 
 if TYPE_CHECKING:
+    from datafusion._internal import expr as expr_internal
     from datafusion.common import NullTreatment
     from datafusion.expr import SortKey
 
 _f = _functions.spark
 
 # Reused int32 literal so optional-arg defaults don't rebuild it per call.
-_ZERO_I32 = Expr.literal(pa.scalar(0, type=pa.int32()))
+_ZERO_I32 = Expr.literal(pa.scalar(0, type=pa.int32())).expr
 
 
-def _coerce_i32(value: Expr | int | None) -> Expr | None:
+def _coerce_i32(value: Expr | int | None) -> expr_internal.Expr | None:
     """Coerce a native ``int`` to an int32 literal, passing ``Expr``/``None`` through.
 
     Several Spark datetime and interval builders require 32-bit integer
     inputs, so a bare ``int`` must become an int32 literal rather than the
-    int64 default that :meth:`Expr.literal` would produce.
+    int64 default that :meth:`Expr.literal` would produce. Like
+    :func:`~datafusion.expr.coerce_to_literal`, it returns the internal
+    expression.
     """
-    if value is None or isinstance(value, Expr):
-        return value
-    return Expr.literal(pa.scalar(value, type=pa.int32()))
+    if value is None:
+        return None
+    if isinstance(value, Expr):
+        return value.expr
+    return Expr.literal(pa.scalar(value, type=pa.int32())).expr
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +211,7 @@ def array_contains(col: Expr | str, value: Expr | Any) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         True
     """
-    return Expr(_f.array_contains(coerce_to_column(col), coerce_to_expr(value).expr))
+    return Expr(_f.array_contains(coerce_to_column(col), coerce_to_literal(value)))
 
 
 def array(*cols: Expr | str) -> Expr:
@@ -262,7 +267,7 @@ def array_repeat(col: Expr | str, count: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         ['a', 'a', 'a']
     """
-    return Expr(_f.array_repeat(coerce_to_column(col), coerce_to_expr(count).expr))
+    return Expr(_f.array_repeat(coerce_to_column(col), coerce_to_literal(count)))
 
 
 def slice(x: Expr | str, start: Expr | int, length: Expr | int) -> Expr:
@@ -280,7 +285,7 @@ def slice(x: Expr | str, start: Expr | int, length: Expr | int) -> Expr:
     """
     return Expr(
         _f.slice(
-            coerce_to_column(x), coerce_to_expr(start).expr, coerce_to_expr(length).expr
+            coerce_to_column(x), coerce_to_literal(start), coerce_to_literal(length)
         )
     )
 
@@ -393,7 +398,7 @@ def shiftleft(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         8
     """
-    return Expr(_f.shiftleft(coerce_to_column(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.shiftleft(coerce_to_column(col), coerce_to_literal(numBits)))
 
 
 def shiftright(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -409,7 +414,7 @@ def shiftright(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         2
     """
-    return Expr(_f.shiftright(coerce_to_column(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.shiftright(coerce_to_column(col), coerce_to_literal(numBits)))
 
 
 def shiftrightunsigned(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -426,7 +431,7 @@ def shiftrightunsigned(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N
         2
     """
     return Expr(
-        _f.shiftrightunsigned(coerce_to_column(col), coerce_to_expr(numBits).expr)
+        _f.shiftrightunsigned(coerce_to_column(col), coerce_to_literal(numBits))
     )
 
 
@@ -472,8 +477,8 @@ def if_(condition: Expr | str, if_true: Expr | Any, if_false: Expr | Any) -> Exp
     return Expr(
         _f.if_(
             coerce_to_column(condition),
-            coerce_to_expr(if_true).expr,
-            coerce_to_expr(if_false).expr,
+            coerce_to_literal(if_true),
+            coerce_to_literal(if_false),
         )
     )
 
@@ -497,7 +502,7 @@ def spark_cast(arg: Expr | str, type_str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py().isoformat()
         '2020-01-15T14:30:45+00:00'
     """
-    return Expr(_f.spark_cast(coerce_to_column(arg), coerce_to_expr(type_str).expr))
+    return Expr(_f.spark_cast(coerce_to_column(arg), coerce_to_literal(type_str)))
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +525,7 @@ def add_months(start: Expr | str, months: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 3, 15)
     """
-    return Expr(_f.add_months(coerce_to_column(start), _coerce_i32(months).expr))
+    return Expr(_f.add_months(coerce_to_column(start), _coerce_i32(months)))
 
 
 def date_add(start: Expr | str, days: Expr | int) -> Expr:
@@ -538,7 +543,7 @@ def date_add(start: Expr | str, days: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 20)
     """
-    return Expr(_f.date_add(coerce_to_column(start), _coerce_i32(days).expr))
+    return Expr(_f.date_add(coerce_to_column(start), _coerce_i32(days)))
 
 
 def date_sub(start: Expr | str, days: Expr | int) -> Expr:
@@ -556,7 +561,7 @@ def date_sub(start: Expr | str, days: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 10)
     """
-    return Expr(_f.date_sub(coerce_to_column(start), _coerce_i32(days).expr))
+    return Expr(_f.date_sub(coerce_to_column(start), _coerce_i32(days)))
 
 
 def hour(col: Expr | str) -> Expr:
@@ -658,10 +663,10 @@ def make_dt_interval(
     """
     return Expr(
         _f.make_dt_interval(
-            (_coerce_i32(days) if days is not None else _ZERO_I32).expr,
-            (_coerce_i32(hours) if hours is not None else _ZERO_I32).expr,
-            (_coerce_i32(mins) if mins is not None else _ZERO_I32).expr,
-            (coerce_to_expr(secs) if secs is not None else Expr.literal(0.0)).expr,
+            _coerce_i32(days) if days is not None else _ZERO_I32,
+            _coerce_i32(hours) if hours is not None else _ZERO_I32,
+            _coerce_i32(mins) if mins is not None else _ZERO_I32,
+            coerce_to_literal(secs if secs is not None else 0.0),
         )
     )
 
@@ -694,13 +699,13 @@ def make_interval(
     """
     return Expr(
         _f.make_interval(
-            (_coerce_i32(years) if years is not None else _ZERO_I32).expr,
-            (_coerce_i32(months) if months is not None else _ZERO_I32).expr,
-            (_coerce_i32(weeks) if weeks is not None else _ZERO_I32).expr,
-            (_coerce_i32(days) if days is not None else _ZERO_I32).expr,
-            (_coerce_i32(hours) if hours is not None else _ZERO_I32).expr,
-            (_coerce_i32(mins) if mins is not None else _ZERO_I32).expr,
-            (coerce_to_expr(secs) if secs is not None else Expr.literal(0.0)).expr,
+            _coerce_i32(years) if years is not None else _ZERO_I32,
+            _coerce_i32(months) if months is not None else _ZERO_I32,
+            _coerce_i32(weeks) if weeks is not None else _ZERO_I32,
+            _coerce_i32(days) if days is not None else _ZERO_I32,
+            _coerce_i32(hours) if hours is not None else _ZERO_I32,
+            _coerce_i32(mins) if mins is not None else _ZERO_I32,
+            coerce_to_literal(secs if secs is not None else 0.0),
         )
     )
 
@@ -720,7 +725,7 @@ def next_day(date: Expr | str, dayOfWeek: Expr | str) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 20)
     """
-    return Expr(_f.next_day(coerce_to_column(date), coerce_to_expr(dayOfWeek).expr))
+    return Expr(_f.next_day(coerce_to_column(date), coerce_to_literal(dayOfWeek)))
 
 
 def date_diff(end: Expr | str, start: Expr | str) -> Expr:
@@ -758,7 +763,7 @@ def date_trunc(format: Expr | str, timestamp: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.datetime(2020, 1, 1, 0, 0)
     """
-    return Expr(_f.date_trunc(coerce_to_expr(format).expr, coerce_to_column(timestamp)))
+    return Expr(_f.date_trunc(coerce_to_literal(format), coerce_to_column(timestamp)))
 
 
 def time_trunc(unit: Expr | str, time: Expr | str) -> Expr:
@@ -796,7 +801,7 @@ def trunc(date: Expr | str, format: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 1)
     """
-    return Expr(_f.trunc(coerce_to_column(date), coerce_to_expr(format).expr))
+    return Expr(_f.trunc(coerce_to_column(date), coerce_to_literal(format)))
 
 
 def date_part(field: Expr | str, source: Expr | str) -> Expr:
@@ -815,7 +820,7 @@ def date_part(field: Expr | str, source: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2020
     """
-    return Expr(_f.date_part(coerce_to_expr(field).expr, coerce_to_column(source)))
+    return Expr(_f.date_part(coerce_to_literal(field), coerce_to_column(source)))
 
 
 def from_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
@@ -837,7 +842,7 @@ def from_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
         datetime.datetime(2020, 1, 15, 14, 30, 45)
     """
     return Expr(
-        _f.from_utc_timestamp(coerce_to_column(timestamp), coerce_to_expr(tz).expr)
+        _f.from_utc_timestamp(coerce_to_column(timestamp), coerce_to_literal(tz))
     )
 
 
@@ -859,9 +864,7 @@ def to_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.datetime(2020, 1, 15, 14, 30, 45)
     """
-    return Expr(
-        _f.to_utc_timestamp(coerce_to_column(timestamp), coerce_to_expr(tz).expr)
-    )
+    return Expr(_f.to_utc_timestamp(coerce_to_column(timestamp), coerce_to_literal(tz)))
 
 
 def unix_date(col: Expr | str) -> Expr:
@@ -977,7 +980,7 @@ def sha2(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
     """
-    return Expr(_f.sha2(coerce_to_column(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.sha2(coerce_to_column(col), coerce_to_literal(numBits)))
 
 
 def xxhash64(*cols: Expr | str) -> Expr:
@@ -1016,7 +1019,7 @@ def json_tuple(col: Expr | str, *fields: Expr | str) -> Expr:
         {'c0': '1', 'c1': 'x'}
     """
     return Expr(
-        _f.json_tuple(coerce_to_column(col), *[coerce_to_expr(f).expr for f in fields])
+        _f.json_tuple(coerce_to_column(col), *[coerce_to_literal(f) for f in fields])
     )
 
 
@@ -1205,7 +1208,7 @@ def modulus(dividend: Expr | float, divisor: Expr | float) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1
     """
-    return Expr(_f.modulus(coerce_to_expr(dividend).expr, coerce_to_expr(divisor).expr))
+    return Expr(_f.modulus(coerce_to_literal(dividend), coerce_to_literal(divisor)))
 
 
 def pmod(dividend: Expr | float, divisor: Expr | float) -> Expr:
@@ -1221,7 +1224,7 @@ def pmod(dividend: Expr | float, divisor: Expr | float) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2
     """
-    return Expr(_f.pmod(coerce_to_expr(dividend).expr, coerce_to_expr(divisor).expr))
+    return Expr(_f.pmod(coerce_to_literal(dividend), coerce_to_literal(divisor)))
 
 
 def rint(col: Expr | str) -> Expr:
@@ -1255,8 +1258,8 @@ def round(col: Expr | str, scale: Expr | int | None = None) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2.35
     """
-    scale_expr = coerce_to_expr(scale) if scale is not None else _ZERO_I32
-    return Expr(_f.round(coerce_to_column(col), scale_expr.expr))
+    scale_expr = coerce_to_literal(scale) if scale is not None else _ZERO_I32
+    return Expr(_f.round(coerce_to_column(col), scale_expr))
 
 
 def unhex(col: Expr | str) -> Expr:
@@ -1298,7 +1301,7 @@ def width_bucket(
             coerce_to_column(v),
             coerce_to_column(min),
             coerce_to_column(max),
-            coerce_to_expr(numBucket).expr,
+            coerce_to_literal(numBucket),
         )
     )
 
@@ -1545,7 +1548,7 @@ def space(col: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         '   '
     """
-    return Expr(_f.space(_coerce_i32(col).expr))
+    return Expr(_f.space(_coerce_i32(col)))
 
 
 def substring(str: Expr | str, pos: Expr | int, len: Expr | int) -> Expr:
@@ -1564,7 +1567,7 @@ def substring(str: Expr | str, pos: Expr | int, len: Expr | int) -> Expr:
     """
     return Expr(
         _f.substring(
-            coerce_to_column(str), coerce_to_expr(pos).expr, coerce_to_expr(len).expr
+            coerce_to_column(str), coerce_to_literal(pos), coerce_to_literal(len)
         )
     )
 

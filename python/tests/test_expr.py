@@ -43,6 +43,7 @@ from datafusion.expr import (
     DescribeTable,
     DmlStatement,
     DropCatalogSchema,
+    Expr,
     Filter,
     Limit,
     Literal,
@@ -53,9 +54,13 @@ from datafusion.expr import (
     TransactionEnd,
     TransactionStart,
     Values,
+    coerce_to_column,
     coerce_to_expr,
     coerce_to_expr_list,
     coerce_to_expr_or_none,
+    coerce_to_literal,
+    coerce_to_literal_list,
+    coerce_to_literal_or_none,
     ensure_expr,
     ensure_expr_list,
 )
@@ -1046,80 +1051,86 @@ def test_ensure_expr_list_bytearray():
         ensure_expr_list(bytearray(b"a"))
 
 
-def test_coerce_to_expr_passes_expr_through():
+def test_coerce_to_literal_passes_expr_through():
     e = col("a")
-    result = coerce_to_expr(e)
-    assert isinstance(result, type(e))
-    assert str(result) == str(e)
+    assert coerce_to_literal(e) is e.expr
 
 
-def test_coerce_to_expr_wraps_int():
-    result = coerce_to_expr(42)
-    assert isinstance(result, type(lit(42)))
+def test_coerce_to_column_and_literal_read_a_str_differently():
+    assert str(coerce_to_column("a")) == str(col("a").expr)
+    assert str(coerce_to_literal("a")) == str(lit("a").expr)
 
 
-def test_coerce_to_expr_wraps_str():
-    result = coerce_to_expr("hello")
-    assert isinstance(result, type(lit("hello")))
+@pytest.mark.parametrize("value", [42, "hello", 3.14, True])
+def test_coerce_to_literal_wraps_native_values(value):
+    assert str(coerce_to_literal(value)) == str(lit(value).expr)
 
 
-def test_coerce_to_expr_wraps_float():
-    result = coerce_to_expr(3.14)
-    assert isinstance(result, type(lit(3.14)))
+def test_coerce_to_literal_or_none_returns_none():
+    assert coerce_to_literal_or_none(None) is None
 
 
-def test_coerce_to_expr_wraps_bool():
-    result = coerce_to_expr(True)
-    assert isinstance(result, type(lit(True)))
+def test_coerce_to_literal_or_none_wraps_value():
+    assert str(coerce_to_literal_or_none(42)) == str(lit(42).expr)
 
 
-def test_coerce_to_expr_or_none_returns_none():
-    assert coerce_to_expr_or_none(None) is None
-
-
-def test_coerce_to_expr_or_none_wraps_value():
-    result = coerce_to_expr_or_none(42)
-    assert isinstance(result, type(lit(42)))
-
-
-def test_coerce_to_expr_or_none_passes_expr_through():
+def test_coerce_to_literal_or_none_passes_expr_through():
     e = col("a")
-    result = coerce_to_expr_or_none(e)
-    assert isinstance(result, type(e))
-    assert str(result) == str(e)
+    assert coerce_to_literal_or_none(e) is e.expr
 
 
-def test_coerce_to_expr_list_empty():
-    assert coerce_to_expr_list([]) == []
+def test_coerce_to_literal_list_empty():
+    assert coerce_to_literal_list([]) == []
 
 
-def test_coerce_to_expr_list_wraps_literals():
-    result = coerce_to_expr_list([1, "x", 3.14, True])
+def test_coerce_to_literal_list_wraps_literals():
+    result = coerce_to_literal_list([1, "x", 3.14, True])
     expected = [lit(1), lit("x"), lit(3.14), lit(True)]
-    assert [str(r) for r in result] == [str(e) for e in expected]
+    assert [str(r) for r in result] == [str(e.expr) for e in expected]
 
 
-def test_coerce_to_expr_list_passes_exprs_through():
+def test_coerce_to_literal_list_mixed():
     e = col("a")
-    result = coerce_to_expr_list([e])
-    assert isinstance(result[0], type(e))
-    assert str(result[0]) == str(e)
+    result = coerce_to_literal_list([e, 42, "hello"])
+    assert [str(r) for r in result] == [
+        str(e.expr),
+        str(lit(42).expr),
+        str(lit("hello").expr),
+    ]
 
 
-def test_coerce_to_expr_list_mixed():
-    e = col("a")
-    result = coerce_to_expr_list([e, 42, "hello"])
-    assert [str(r) for r in result] == [str(e), str(lit(42)), str(lit("hello"))]
+def test_coerce_to_literal_list_accepts_tuple():
+    result = coerce_to_literal_list((1, 2))
+    assert [str(r) for r in result] == [str(lit(1).expr), str(lit(2).expr)]
 
 
-def test_coerce_to_expr_list_accepts_tuple():
-    result = coerce_to_expr_list((1, 2))
-    assert [str(r) for r in result] == [str(lit(1)), str(lit(2))]
+def test_coerce_to_literal_list_accepts_generator():
+    result = coerce_to_literal_list(x for x in [1, 2, 3])
+    assert [str(r) for r in result] == [str(lit(v).expr) for v in (1, 2, 3)]
 
 
-def test_coerce_to_expr_list_accepts_generator():
-    result = coerce_to_expr_list(x for x in [1, 2, 3])
-    assert [str(r) for r in result] == [str(lit(1)), str(lit(2)), str(lit(3))]
+@pytest.mark.parametrize(
+    ("deprecated", "value", "expected"),
+    [
+        (coerce_to_expr, 42, [lit(42)]),
+        (coerce_to_expr_or_none, 42, [lit(42)]),
+        (coerce_to_expr_list, [42, "x"], [lit(42), lit("x")]),
+    ],
+)
+def test_deprecated_coerce_to_expr_helpers_still_return_expr(
+    deprecated, value, expected
+):
+    """The pre-rename helpers keep returning ``Expr``, so callers do not break."""
+    with pytest.deprecated_call():
+        result = deprecated(value)
+    results = result if isinstance(result, list) else [result]
+    assert all(isinstance(r, Expr) for r in results)
+    assert [str(r) for r in results] == [str(e) for e in expected]
+
+
+def test_deprecated_coerce_to_expr_or_none_passes_none_through():
+    with pytest.deprecated_call():
+        assert coerce_to_expr_or_none(None) is None
 
 
 @pytest.mark.parametrize(

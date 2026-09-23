@@ -46,6 +46,7 @@ operators and helpers.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -283,10 +284,22 @@ __all__ = [
     "coerce_to_expr",
     "coerce_to_expr_list",
     "coerce_to_expr_or_none",
+    "coerce_to_literal",
+    "coerce_to_literal_list",
+    "coerce_to_literal_or_none",
     "ensure_expr",
     "ensure_expr_list",
     "ensure_expr_or_none",
 ]
+
+
+def _warn_coerce_to_expr_deprecated(old_name: str, new_name: str) -> None:
+    warnings.warn(
+        f"{old_name}() is deprecated; use {new_name}(), which returns the "
+        "internal expression rather than an Expr to unwrap.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def ensure_expr(value: Expr | Any) -> expr_internal.Expr:
@@ -297,7 +310,7 @@ def ensure_expr(value: Expr | Any) -> expr_internal.Expr:
     :func:`~datafusion.lit` expressions.
 
     See Also:
-        :func:`coerce_to_expr` — the opposite behavior: *wraps* non-``Expr``
+        :func:`coerce_to_literal` — the opposite behavior: *wraps* non-``Expr``
         values as literals instead of rejecting them.
 
     Args:
@@ -364,13 +377,66 @@ def ensure_expr_list(
     return list(_iter(exprs))
 
 
-def coerce_to_expr(value: Any) -> Expr:
-    """Coerce a native Python value to an ``Expr`` literal, passing ``Expr`` through.
+def coerce_to_literal(value: Any) -> expr_internal.Expr:
+    """Convert a native Python value to a literal expression.
 
-    This is the complement of :func:`ensure_expr`: where ``ensure_expr``
-    *rejects* non-``Expr`` values, ``coerce_to_expr`` *wraps* them via
-    :meth:`Expr.literal` so that functions can accept native Python types
-    (``int``, ``float``, ``str``, ``bool``, etc.) alongside ``Expr``.
+    Use this for an argument holding a fixed scalar, where a bare string reads
+    as a literal. An ``Expr`` passes through unwrapped; anything else is wrapped
+    via :meth:`Expr.literal`, so functions accept native Python types (``int``,
+    ``float``, ``str``, ``bool``, ...) alongside ``Expr``.
+
+    See Also:
+        :func:`coerce_to_column` — for an argument holding the data being
+        operated on, where a bare string reads as a column name.
+        :func:`ensure_expr` — for an argument where the two readings are
+        ambiguous, so the caller must be explicit.
+
+    Args:
+        value: An ``Expr`` instance, or a Python literal to wrap.
+
+    Returns:
+        The internal :class:`~datafusion._internal.expr.Expr` representation.
+    """
+    if isinstance(value, Expr):
+        return value.expr
+    return Expr.literal(value).expr
+
+
+def coerce_to_literal_or_none(value: Any | None) -> expr_internal.Expr | None:
+    """Convert an optional value to a literal expression, passing ``None`` through.
+
+    Same as :func:`coerce_to_literal` but accepts ``None`` for optional
+    parameters.
+
+    Args:
+        value: An ``Expr`` instance, a Python literal to wrap, or ``None``.
+
+    Returns:
+        The internal expression representation, or ``None``.
+    """
+    if value is None:
+        return None
+    return coerce_to_literal(value)
+
+
+def coerce_to_literal_list(values: Iterable[Any]) -> list[expr_internal.Expr]:
+    """Convert each item in an iterable via :func:`coerce_to_literal`.
+
+    Args:
+        values: Iterable of ``Expr`` instances or Python literals to wrap.
+
+    Returns:
+        A list of internal expression representations.
+    """
+    return [coerce_to_literal(value) for value in values]
+
+
+def coerce_to_expr(value: Any) -> Expr:
+    """Coerce a native Python value to an ``Expr`` literal.
+
+    .. deprecated::
+        Use :func:`coerce_to_literal`, which returns the internal expression
+        directly rather than an ``Expr`` the caller has to unwrap.
 
     Args:
         value: An ``Expr`` instance (returned as-is) or a Python literal to wrap.
@@ -378,6 +444,7 @@ def coerce_to_expr(value: Any) -> Expr:
     Returns:
         An ``Expr`` representing the value.
     """
+    _warn_coerce_to_expr_deprecated("coerce_to_expr", "coerce_to_literal")
     if isinstance(value, Expr):
         return value
     return Expr.literal(value)
@@ -386,7 +453,8 @@ def coerce_to_expr(value: Any) -> Expr:
 def coerce_to_expr_or_none(value: Any | None) -> Expr | None:
     """Coerce a value to ``Expr`` or pass ``None`` through unchanged.
 
-    Same as :func:`coerce_to_expr` but accepts ``None`` for optional parameters.
+    .. deprecated::
+        Use :func:`coerce_to_literal_or_none`.
 
     Args:
         value: An ``Expr`` instance, a Python literal to wrap, or ``None``.
@@ -394,13 +462,19 @@ def coerce_to_expr_or_none(value: Any | None) -> Expr | None:
     Returns:
         An ``Expr`` representing the value, or ``None``.
     """
+    _warn_coerce_to_expr_deprecated(
+        "coerce_to_expr_or_none", "coerce_to_literal_or_none"
+    )
     if value is None:
         return None
-    return coerce_to_expr(value)
+    return Expr.literal(value) if not isinstance(value, Expr) else value
 
 
 def coerce_to_expr_list(values: Iterable[Any]) -> list[Expr]:
-    """Coerce each item in an iterable to ``Expr`` via :func:`coerce_to_expr`.
+    """Coerce each item in an iterable to ``Expr``.
+
+    .. deprecated::
+        Use :func:`coerce_to_literal_list`.
 
     Args:
         values: Iterable of ``Expr`` instances or Python literals to wrap.
@@ -408,7 +482,10 @@ def coerce_to_expr_list(values: Iterable[Any]) -> list[Expr]:
     Returns:
         A list of ``Expr`` instances.
     """
-    return [coerce_to_expr(value) for value in values]
+    _warn_coerce_to_expr_deprecated("coerce_to_expr_list", "coerce_to_literal_list")
+    return [
+        value if isinstance(value, Expr) else Expr.literal(value) for value in values
+    ]
 
 
 def coerce_to_column(value: Expr | str) -> expr_internal.Expr:
@@ -418,8 +495,8 @@ def coerce_to_column(value: Expr | str) -> expr_internal.Expr:
     string reads as a column name.
 
     See Also:
-        :func:`coerce_to_expr` — for an argument holding a fixed scalar, where a
-        bare string reads as a literal.
+        :func:`coerce_to_literal` — for an argument holding a fixed scalar, where
+        a bare string reads as a literal.
         :func:`ensure_expr` — for an argument where the two readings are
         ambiguous, so the caller must be explicit.
 

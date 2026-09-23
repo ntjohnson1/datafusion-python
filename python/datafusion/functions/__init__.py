@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
 
 from datafusion._internal import functions as f
 from datafusion.common import NullTreatment
@@ -66,9 +66,9 @@ from datafusion.expr import (
     coerce_to_column,
     coerce_to_column_list,
     coerce_to_column_or_none,
-    coerce_to_expr,
-    coerce_to_expr_list,
-    coerce_to_expr_or_none,
+    coerce_to_literal,
+    coerce_to_literal_list,
+    coerce_to_literal_or_none,
     ensure_expr,
     ensure_expr_or_none,
     expr_list_to_raw_expr_list,
@@ -459,8 +459,8 @@ def encode(expr: Expr | str, encoding: Expr | str) -> Expr:
         'aGVsbG8'
     """
     _warn_if_expr_for_literal_arg(encoding, "encode", "encoding")
-    encoding = coerce_to_expr(encoding)
-    return Expr(f.encode(coerce_to_column(expr), encoding.expr))
+    encoding = coerce_to_literal(encoding)
+    return Expr(f.encode(coerce_to_column(expr), encoding))
 
 
 def decode(expr: Expr | str, encoding: Expr | str) -> Expr:
@@ -474,8 +474,8 @@ def decode(expr: Expr | str, encoding: Expr | str) -> Expr:
         b'hello'
     """
     _warn_if_expr_for_literal_arg(encoding, "decode", "encoding")
-    encoding = coerce_to_expr(encoding)
-    return Expr(f.decode(coerce_to_column(expr), encoding.expr))
+    encoding = coerce_to_literal(encoding)
+    return Expr(f.decode(coerce_to_column(expr), encoding))
 
 
 def array_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
@@ -488,10 +488,8 @@ def array_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
         >>> result.collect_column("s")[0].as_py()
         '1,2,3'
     """
-    delimiter = coerce_to_expr(delimiter)
-    return Expr(
-        f.array_to_string(coerce_to_column(expr), delimiter.expr.cast(pa.string()))
-    )
+    delimiter = coerce_to_literal(delimiter)
+    return Expr(f.array_to_string(coerce_to_column(expr), delimiter.cast(pa.string())))
 
 
 def array_join(expr: Expr | str, delimiter: Expr | str) -> Expr:
@@ -590,8 +588,8 @@ def _to_lambda(fn: Expr | Callable[..., Any]) -> Expr:
     if not params:
         msg = "lambda callable must accept at least one parameter"
         raise ValueError(msg)
-    body = coerce_to_expr(fn(*[lambda_var(p) for p in params]))
-    return lambda_(params, body)
+    body = fn(*[lambda_var(p) for p in params])
+    return lambda_(params, body if isinstance(body, Expr) else Expr.literal(body))
 
 
 def array_transform(array: Expr | str, transform: Expr | Callable[..., Any]) -> Expr:
@@ -765,8 +763,8 @@ def digest(value: Expr | str, method: Expr | str) -> Expr:
         True
     """
     _warn_if_expr_for_literal_arg(method, "digest", "method")
-    method = coerce_to_expr(method)
-    return Expr(f.digest(coerce_to_column(value), method.expr))
+    method = coerce_to_literal(method)
+    return Expr(f.digest(coerce_to_column(value), method))
 
 
 def contains(string: Expr | str, search_str: Expr | str) -> Expr:
@@ -779,8 +777,8 @@ def contains(string: Expr | str, search_str: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py()
         True
     """
-    search_str = coerce_to_expr(search_str)
-    return Expr(f.contains(coerce_to_column(string), search_str.expr))
+    search_str = coerce_to_literal(search_str)
+    return Expr(f.contains(coerce_to_column(string), search_str))
 
 
 def concat(*args: Expr | str) -> Expr:
@@ -1241,8 +1239,8 @@ def ends_with(arg: Expr | str, suffix: Expr | str) -> Expr:
         >>> ends_with_df.collect_column("ends_with")[0].as_py()
         True
     """
-    suffix = coerce_to_expr(suffix)
-    return Expr(f.ends_with(coerce_to_column(arg), suffix.expr))
+    suffix = coerce_to_literal(suffix)
+    return Expr(f.ends_with(coerce_to_column(arg), suffix))
 
 
 def exp(arg: Expr | str) -> Expr:
@@ -1286,8 +1284,8 @@ def find_in_set(string: Expr | str, string_list: Expr | str) -> Expr:
         >>> result.collect_column("pos")[0].as_py()
         2
     """
-    string_list = coerce_to_expr(string_list)
-    return Expr(f.find_in_set(coerce_to_column(string), string_list.expr))
+    string_list = coerce_to_literal(string_list)
+    return Expr(f.find_in_set(coerce_to_column(string), string_list))
 
 
 def floor(arg: Expr | str) -> Expr:
@@ -1426,8 +1424,8 @@ def left(string: Expr | str, n: Expr | int) -> Expr:
         >>> left_df.collect_column("left")[0].as_py()
         'the'
     """
-    n = coerce_to_expr(n)
-    return Expr(f.left(coerce_to_column(string), n.expr))
+    n = coerce_to_literal(n)
+    return Expr(f.left(coerce_to_column(string), n))
 
 
 def levenshtein(string1: Expr | str, string2: Expr | str) -> Expr:
@@ -1440,8 +1438,8 @@ def levenshtein(string1: Expr | str, string2: Expr | str) -> Expr:
         >>> result.collect_column("d")[0].as_py()
         3
     """
-    string2 = coerce_to_expr(string2)
-    return Expr(f.levenshtein(coerce_to_column(string1), string2.expr))
+    string2 = coerce_to_literal(string2)
+    return Expr(f.levenshtein(coerce_to_column(string1), string2))
 
 
 def ln(arg: Expr | str) -> Expr:
@@ -1467,8 +1465,8 @@ def log(base: Expr | int | float, num: Expr | str) -> Expr:  # noqa: PYI041
         >>> result.collect_column("log")[0].as_py()
         2.0
     """
-    base = coerce_to_expr(base)
-    return Expr(f.log(base.expr, coerce_to_column(num)))
+    base = coerce_to_literal(base)
+    return Expr(f.log(base, coerce_to_column(num)))
 
 
 def log10(arg: Expr | str) -> Expr:
@@ -1535,9 +1533,9 @@ def lpad(
         >>> result.collect_column("lpad")[0].as_py()
         '...the cat'
     """
-    count = coerce_to_expr(count)
-    characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.lpad(coerce_to_column(string), count.expr, characters.expr))
+    count = coerce_to_literal(count)
+    characters = coerce_to_literal(characters if characters is not None else " ")
+    return Expr(f.lpad(coerce_to_column(string), count, characters))
 
 
 def ltrim(arg: Expr | str) -> Expr:
@@ -1655,14 +1653,12 @@ def overlay(
         >>> result.collect_column("o")[0].as_py()
         'abXYef'
     """
-    substring = coerce_to_expr(substring)
-    start = coerce_to_expr(start)
+    substring = coerce_to_literal(substring)
+    start = coerce_to_literal(start)
     if length is None:
-        return Expr(f.overlay(coerce_to_column(string), substring.expr, start.expr))
-    length = coerce_to_expr(length)
-    return Expr(
-        f.overlay(coerce_to_column(string), substring.expr, start.expr, length.expr)
-    )
+        return Expr(f.overlay(coerce_to_column(string), substring, start))
+    length = coerce_to_literal(length)
+    return Expr(f.overlay(coerce_to_column(string), substring, start, length))
 
 
 def pi() -> Expr:
@@ -1700,8 +1696,8 @@ def power(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI0
         >>> result.collect_column("pow")[0].as_py()
         8.0
     """
-    exponent = coerce_to_expr(exponent)
-    return Expr(f.power(coerce_to_column(base), exponent.expr))
+    exponent = coerce_to_literal(exponent)
+    return Expr(f.power(coerce_to_column(base), exponent))
 
 
 def pow(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
@@ -1754,13 +1750,13 @@ def regexp_like(
         >>> result.collect_column("m")[0].as_py()
         True
     """
-    regex = coerce_to_expr(regex)
-    flags = coerce_to_expr_or_none(flags)
+    regex = coerce_to_literal(regex)
+    flags = coerce_to_literal_or_none(flags)
     return Expr(
         f.regexp_like(
             coerce_to_column(string),
-            regex.expr,
-            flags.expr if flags is not None else None,
+            regex,
+            flags,
         )
     )
 
@@ -1792,13 +1788,13 @@ def regexp_match(
         >>> result.collect_column("m")[0].as_py()
         ['hello']
     """
-    regex = coerce_to_expr(regex)
-    flags = coerce_to_expr_or_none(flags)
+    regex = coerce_to_literal(regex)
+    flags = coerce_to_literal_or_none(flags)
     return Expr(
         f.regexp_match(
             coerce_to_column(string),
-            regex.expr,
-            flags.expr if flags is not None else None,
+            regex,
+            flags,
         )
     )
 
@@ -1839,15 +1835,15 @@ def regexp_replace(
         >>> result.collect_column("r")[0].as_py()
         'aX bX cX'
     """
-    pattern = coerce_to_expr(pattern)
-    replacement = coerce_to_expr(replacement)
-    flags = coerce_to_expr_or_none(flags)
+    pattern = coerce_to_literal(pattern)
+    replacement = coerce_to_literal(replacement)
+    flags = coerce_to_literal_or_none(flags)
     return Expr(
         f.regexp_replace(
             coerce_to_column(string),
-            pattern.expr,
-            replacement.expr,
-            flags.expr if flags is not None else None,
+            pattern,
+            replacement,
+            flags,
         )
     )
 
@@ -1880,15 +1876,15 @@ def regexp_count(
         >>> result.collect_column("c")[0].as_py()
         1
     """
-    pattern = coerce_to_expr(pattern)
-    start = coerce_to_expr_or_none(start)
-    flags = coerce_to_expr_or_none(flags)
+    pattern = coerce_to_literal(pattern)
+    start = coerce_to_literal_or_none(start)
+    flags = coerce_to_literal_or_none(flags)
     return Expr(
         f.regexp_count(
             coerce_to_column(string),
-            pattern.expr,
-            start.expr if start is not None else None,
-            flags.expr if flags is not None else None,
+            pattern,
+            start,
+            flags,
         )
     )
 
@@ -1943,20 +1939,20 @@ def regexp_instr(
         >>> result.collect_column("pos")[0].as_py()
         1
     """
-    regex = coerce_to_expr(regex)
-    start = coerce_to_expr_or_none(start)
-    n = coerce_to_expr_or_none(n)
-    flags = coerce_to_expr_or_none(flags)
-    sub_expr = coerce_to_expr_or_none(sub_expr)
+    regex = coerce_to_literal(regex)
+    start = coerce_to_literal_or_none(start)
+    n = coerce_to_literal_or_none(n)
+    flags = coerce_to_literal_or_none(flags)
+    sub_expr = coerce_to_literal_or_none(sub_expr)
 
     return Expr(
         f.regexp_instr(
             coerce_to_column(values),
-            regex.expr,
-            start.expr if start is not None else None,
-            n.expr if n is not None else None,
-            flags.expr if flags is not None else None,
-            sub_expr.expr if sub_expr is not None else None,
+            regex,
+            start,
+            n,
+            flags,
+            sub_expr,
         )
     )
 
@@ -1971,8 +1967,8 @@ def repeat(string: Expr | str, n: Expr | int) -> Expr:
         >>> result.collect_column("r")[0].as_py()
         'hahaha'
     """
-    n = coerce_to_expr(n)
-    return Expr(f.repeat(coerce_to_column(string), n.expr))
+    n = coerce_to_literal(n)
+    return Expr(f.repeat(coerce_to_column(string), n))
 
 
 def replace(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Expr:
@@ -1985,9 +1981,9 @@ def replace(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Exp
         >>> result.collect_column("r")[0].as_py()
         'hello there'
     """
-    from_val = coerce_to_expr(from_val)
-    to_val = coerce_to_expr(to_val)
-    return Expr(f.replace(coerce_to_column(string), from_val.expr, to_val.expr))
+    from_val = coerce_to_literal(from_val)
+    to_val = coerce_to_literal(to_val)
+    return Expr(f.replace(coerce_to_column(string), from_val, to_val))
 
 
 def reverse(arg: Expr | str) -> Expr:
@@ -2013,8 +2009,8 @@ def right(string: Expr | str, n: Expr | int) -> Expr:
         >>> result.collect_column("r")[0].as_py()
         'llo'
     """
-    n = coerce_to_expr(n)
-    return Expr(f.right(coerce_to_column(string), n.expr))
+    n = coerce_to_literal(n)
+    return Expr(f.right(coerce_to_column(string), n))
 
 
 def round(value: Expr | str, decimal_places: Expr | int | None = None) -> Expr:
@@ -2031,8 +2027,10 @@ def round(value: Expr | str, decimal_places: Expr | int | None = None) -> Expr:
         >>> result.collect_column("r")[0].as_py()
         1.57
     """
-    decimal_places = coerce_to_expr(decimal_places if decimal_places is not None else 0)
-    return Expr(f.round(coerce_to_column(value), decimal_places.expr))
+    decimal_places = coerce_to_literal(
+        decimal_places if decimal_places is not None else 0
+    )
+    return Expr(f.round(coerce_to_column(value), decimal_places))
 
 
 def rpad(
@@ -2050,9 +2048,9 @@ def rpad(
         >>> result.collect_column("r")[0].as_py()
         'hi!!!'
     """
-    count = coerce_to_expr(count)
-    characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.rpad(coerce_to_column(string), count.expr, characters.expr))
+    count = coerce_to_literal(count)
+    characters = coerce_to_literal(characters if characters is not None else " ")
+    return Expr(f.rpad(coerce_to_column(string), count, characters))
 
 
 def rtrim(arg: Expr | str) -> Expr:
@@ -2172,9 +2170,9 @@ def split_part(string: Expr | str, delimiter: Expr | str, index: Expr | int) -> 
         >>> result.collect_column("s")[0].as_py()
         'b'
     """
-    delimiter = coerce_to_expr(delimiter)
-    index = coerce_to_expr(index)
-    return Expr(f.split_part(coerce_to_column(string), delimiter.expr, index.expr))
+    delimiter = coerce_to_literal(delimiter)
+    index = coerce_to_literal(index)
+    return Expr(f.split_part(coerce_to_column(string), delimiter, index))
 
 
 def sqrt(arg: Expr | str) -> Expr:
@@ -2200,8 +2198,8 @@ def starts_with(string: Expr | str, prefix: Expr | str) -> Expr:
         >>> result.collect_column("sw")[0].as_py()
         True
     """
-    prefix = coerce_to_expr(prefix)
-    return Expr(f.starts_with(coerce_to_column(string), prefix.expr))
+    prefix = coerce_to_literal(prefix)
+    return Expr(f.starts_with(coerce_to_column(string), prefix))
 
 
 def strpos(string: Expr | str, substring: Expr | str) -> Expr:
@@ -2214,8 +2212,8 @@ def strpos(string: Expr | str, substring: Expr | str) -> Expr:
         >>> result.collect_column("pos")[0].as_py()
         3
     """
-    substring = coerce_to_expr(substring)
-    return Expr(f.strpos(coerce_to_column(string), substring.expr))
+    substring = coerce_to_literal(substring)
+    return Expr(f.strpos(coerce_to_column(string), substring))
 
 
 def substr(string: Expr | str, position: Expr | int) -> Expr:
@@ -2228,8 +2226,8 @@ def substr(string: Expr | str, position: Expr | int) -> Expr:
         >>> result.collect_column("s")[0].as_py()
         'llo'
     """
-    position = coerce_to_expr(position)
-    return Expr(f.substr(coerce_to_column(string), position.expr))
+    position = coerce_to_literal(position)
+    return Expr(f.substr(coerce_to_column(string), position))
 
 
 def substr_index(string: Expr | str, delimiter: Expr | str, count: Expr | int) -> Expr:
@@ -2245,9 +2243,9 @@ def substr_index(string: Expr | str, delimiter: Expr | str, count: Expr | int) -
         >>> result.collect_column("s")[0].as_py()
         'a.b'
     """
-    delimiter = coerce_to_expr(delimiter)
-    count = coerce_to_expr(count)
-    return Expr(f.substr_index(coerce_to_column(string), delimiter.expr, count.expr))
+    delimiter = coerce_to_literal(delimiter)
+    count = coerce_to_literal(count)
+    return Expr(f.substr_index(coerce_to_column(string), delimiter, count))
 
 
 def substring(string: Expr | str, position: Expr | int, length: Expr | int) -> Expr:
@@ -2260,9 +2258,9 @@ def substring(string: Expr | str, position: Expr | int, length: Expr | int) -> E
         >>> result.collect_column("s")[0].as_py()
         'hello'
     """
-    position = coerce_to_expr(position)
-    length = coerce_to_expr(length)
-    return Expr(f.substring(coerce_to_column(string), position.expr, length.expr))
+    position = coerce_to_literal(position)
+    length = coerce_to_literal(length)
+    return Expr(f.substring(coerce_to_column(string), position, length))
 
 
 def tan(arg: Expr | str) -> Expr:
@@ -2353,8 +2351,8 @@ def to_char(arg: Expr | str, formatter: Expr | str) -> Expr:
         >>> result.collect_column("formatted")[0].as_py()
         '2021/01/01'
     """
-    formatter = coerce_to_expr(formatter)
-    return Expr(f.to_char(coerce_to_column(arg), formatter.expr))
+    formatter = coerce_to_literal(formatter)
+    return Expr(f.to_char(coerce_to_column(arg), formatter))
 
 
 def date_format(arg: Expr | str, formatter: Expr | str) -> Expr:
@@ -2364,11 +2362,6 @@ def date_format(arg: Expr | str, formatter: Expr | str) -> Expr:
         This is an alias for :py:func:`to_char`.
     """
     return to_char(arg, formatter)
-
-
-def _raw_literals(values: Iterable[Expr | str | Any]) -> list:
-    """Coerce each value to a literal ``Expr`` and unwrap it to its raw variant."""
-    return [value.expr for value in coerce_to_expr_list(values)]
 
 
 def to_date(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2397,7 +2390,7 @@ def to_date(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("dt")[0].as_py())
         '2021-07-20'
     """
-    return Expr(f.to_date(coerce_to_column(arg), *_raw_literals(formatters)))
+    return Expr(f.to_date(coerce_to_column(arg), *coerce_to_literal_list(formatters)))
 
 
 def to_local_time(*args: Expr | str) -> Expr:
@@ -2432,7 +2425,7 @@ def to_time(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("t")[0].as_py())
         '14:30:00'
     """
-    return Expr(f.to_time(coerce_to_column(arg), *_raw_literals(formatters)))
+    return Expr(f.to_time(coerce_to_column(arg), *coerce_to_literal_list(formatters)))
 
 
 def to_timestamp(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2460,7 +2453,9 @@ def to_timestamp(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
-    return Expr(f.to_timestamp(coerce_to_column(arg), *_raw_literals(formatters)))
+    return Expr(
+        f.to_timestamp(coerce_to_column(arg), *coerce_to_literal_list(formatters))
+    )
 
 
 def to_timestamp_millis(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2487,7 +2482,9 @@ def to_timestamp_millis(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_millis(coerce_to_column(arg), *_raw_literals(formatters))
+        f.to_timestamp_millis(
+            coerce_to_column(arg), *coerce_to_literal_list(formatters)
+        )
     )
 
 
@@ -2515,7 +2512,9 @@ def to_timestamp_micros(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_micros(coerce_to_column(arg), *_raw_literals(formatters))
+        f.to_timestamp_micros(
+            coerce_to_column(arg), *coerce_to_literal_list(formatters)
+        )
     )
 
 
@@ -2542,7 +2541,9 @@ def to_timestamp_nanos(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
-    return Expr(f.to_timestamp_nanos(coerce_to_column(arg), *_raw_literals(formatters)))
+    return Expr(
+        f.to_timestamp_nanos(coerce_to_column(arg), *coerce_to_literal_list(formatters))
+    )
 
 
 def to_timestamp_seconds(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2569,7 +2570,9 @@ def to_timestamp_seconds(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_seconds(coerce_to_column(arg), *_raw_literals(formatters))
+        f.to_timestamp_seconds(
+            coerce_to_column(arg), *coerce_to_literal_list(formatters)
+        )
     )
 
 
@@ -2597,7 +2600,7 @@ def to_unixtime(string: Expr | str, *format_arguments: Expr | str) -> Expr:
     return Expr(
         f.to_unixtime(
             coerce_to_column(string),
-            *_raw_literals(format_arguments),
+            *coerce_to_literal_list(format_arguments),
         )
     )
 
@@ -2669,8 +2672,8 @@ def date_part(part: Expr | str, date: Expr | str) -> Expr:
 
 def _date_part(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
-    part = coerce_to_expr(part)
-    return Expr(f.date_part(part.expr, coerce_to_column(date)))
+    part = coerce_to_literal(part)
+    return Expr(f.date_part(part, coerce_to_column(date)))
 
 
 def extract(part: Expr | str, date: Expr | str) -> Expr:
@@ -2703,8 +2706,8 @@ def date_trunc(part: Expr | str, date: Expr | str) -> Expr:
 
 def _date_trunc(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
-    part = coerce_to_expr(part)
-    return Expr(f.date_trunc(part.expr, coerce_to_column(date)))
+    part = coerce_to_literal(part)
+    return Expr(f.date_trunc(part, coerce_to_column(date)))
 
 
 def datetrunc(part: Expr | str, date: Expr | str) -> Expr:
@@ -2773,10 +2776,10 @@ def make_date(year: Expr | int, month: Expr | int, day: Expr | int) -> Expr:
         >>> result.collect_column("dt")[0].as_py()
         datetime.date(2024, 1, 15)
     """
-    year = coerce_to_expr(year)
-    month = coerce_to_expr(month)
-    day = coerce_to_expr(day)
-    return Expr(f.make_date(year.expr, month.expr, day.expr))
+    year = coerce_to_literal(year)
+    month = coerce_to_literal(month)
+    day = coerce_to_literal(day)
+    return Expr(f.make_date(year, month, day))
 
 
 def make_time(hour: Expr | int, minute: Expr | int, second: Expr | int) -> Expr:
@@ -2799,10 +2802,10 @@ def make_time(hour: Expr | int, minute: Expr | int, second: Expr | int) -> Expr:
         >>> result.collect_column("t")[0].as_py()
         datetime.time(12, 30)
     """
-    hour = coerce_to_expr(hour)
-    minute = coerce_to_expr(minute)
-    second = coerce_to_expr(second)
-    return Expr(f.make_time(hour.expr, minute.expr, second.expr))
+    hour = coerce_to_literal(hour)
+    minute = coerce_to_literal(minute)
+    second = coerce_to_literal(second)
+    return Expr(f.make_time(hour, minute, second))
 
 
 def translate(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Expr:
@@ -2815,9 +2818,9 @@ def translate(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> E
         >>> result.collect_column("t")[0].as_py()
         'HELLO'
     """
-    from_val = coerce_to_expr(from_val)
-    to_val = coerce_to_expr(to_val)
-    return Expr(f.translate(coerce_to_column(string), from_val.expr, to_val.expr))
+    from_val = coerce_to_literal(from_val)
+    to_val = coerce_to_literal(to_val)
+    return Expr(f.translate(coerce_to_column(string), from_val, to_val))
 
 
 def trim(arg: Expr | str) -> Expr:
@@ -2848,8 +2851,8 @@ def trunc(num: Expr | str, precision: Expr | int | None = None) -> Expr:
         1.56
     """
     if precision is not None:
-        precision = coerce_to_expr(precision)
-        return Expr(f.trunc(coerce_to_column(num), precision.expr))
+        precision = coerce_to_literal(precision)
+        return Expr(f.trunc(coerce_to_column(num), precision))
     return Expr(f.trunc(coerce_to_column(num)))
 
 
@@ -3629,8 +3632,8 @@ def array_element(array: Expr | str, n: Expr | int) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         20
     """
-    n = coerce_to_expr(n)
-    return Expr(f.array_element(coerce_to_column(array), n.expr))
+    n = coerce_to_literal(n)
+    return Expr(f.array_element(coerce_to_column(array), n))
 
 
 def array_empty(array: Expr | str) -> Expr:
@@ -4037,10 +4040,8 @@ def array_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [2, 1]
     """
-    max = coerce_to_expr(max)
-    return Expr(
-        f.array_remove_n(coerce_to_column(array), ensure_expr(element), max.expr)
-    )
+    max = coerce_to_literal(max)
+    return Expr(f.array_remove_n(coerce_to_column(array), ensure_expr(element), max))
 
 
 def list_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
@@ -4088,8 +4089,8 @@ def array_repeat(element: Expr, count: Expr | int) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [3, 3, 3]
     """
-    count = coerce_to_expr(count)
-    return Expr(f.array_repeat(ensure_expr(element), count.expr))
+    count = coerce_to_literal(count)
+    return Expr(f.array_repeat(ensure_expr(element), count))
 
 
 def list_repeat(element: Expr, count: Expr | int) -> Expr:
@@ -4147,13 +4148,13 @@ def array_replace_n(
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 9, 1]
     """
-    max = coerce_to_expr(max)
+    max = coerce_to_literal(max)
     return Expr(
         f.array_replace_n(
             coerce_to_column(array),
             ensure_expr(from_val),
             ensure_expr(to_val),
-            max.expr,
+            max,
         )
     )
 
@@ -4271,15 +4272,15 @@ def array_slice(
         >>> result.collect_column("result")[0].as_py()
         [1, 3]
     """
-    begin = coerce_to_expr(begin)
-    end = coerce_to_expr(end)
-    stride = coerce_to_expr_or_none(stride)
+    begin = coerce_to_literal(begin)
+    end = coerce_to_literal(end)
+    stride = coerce_to_literal_or_none(stride)
     return Expr(
         f.array_slice(
             coerce_to_column(array),
-            begin.expr,
-            end.expr,
-            stride.expr if stride is not None else None,
+            begin,
+            end,
+            stride,
         )
     )
 
@@ -4386,8 +4387,8 @@ def array_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 0, 0]
     """
-    size = coerce_to_expr(size)
-    return Expr(f.array_resize(coerce_to_column(array), size.expr, ensure_expr(value)))
+    size = coerce_to_literal(size)
+    return Expr(f.array_resize(coerce_to_column(array), size, ensure_expr(value)))
 
 
 def list_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
@@ -4558,13 +4559,13 @@ def string_to_array(
         >>> result.collect_column("result")[0].as_py()
         ['hello', None]
     """
-    delimiter = coerce_to_expr(delimiter)
-    null_string = coerce_to_expr_or_none(null_string)
+    delimiter = coerce_to_literal(delimiter)
+    null_string = coerce_to_literal_or_none(null_string)
     return Expr(
         f.string_to_array(
             coerce_to_column(string),
-            delimiter.expr,
-            null_string.expr if null_string is not None else None,
+            delimiter,
+            null_string,
         )
     )
 
