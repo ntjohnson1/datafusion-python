@@ -410,8 +410,43 @@ def _to_raw_expr(value: Expr | str) -> expr_internal.Expr:
     raise TypeError(error)
 
 
+def _to_raw_expr_or_none(value: Expr | str | None) -> expr_internal.Expr | None:
+    """Convert an optional expression or column name to its raw variant.
+
+    Same as :func:`_to_raw_expr` but passes ``None`` through for optional
+    parameters.
+
+    Args:
+        value: Candidate expression, column name, or ``None``.
+
+    Returns:
+        The internal expression representation, or ``None``.
+
+    Raises:
+        TypeError: If ``value`` is neither an :class:`Expr`, ``str``, nor ``None``.
+    """
+    if value is None:
+        return None
+    return _to_raw_expr(value)
+
+
+def _to_raw_expr_list(values: Iterable[Expr | str]) -> list[expr_internal.Expr]:
+    """Convert an iterable of expressions or column names to raw expressions.
+
+    Args:
+        values: Iterable of :class:`Expr` instances or column names.
+
+    Returns:
+        A list of internal expression representations.
+
+    Raises:
+        TypeError: If any item is neither an :class:`Expr` nor ``str``.
+    """
+    return [_to_raw_expr(value) for value in values]
+
+
 def expr_list_to_raw_expr_list(
-    expr_list: list[Expr] | Expr | None,
+    expr_list: list[Expr | str] | Expr | str | None,
 ) -> list[expr_internal.Expr] | None:
     """Convert a sequence of expressions or column names to raw expressions."""
     if isinstance(expr_list, Expr | str):
@@ -421,8 +456,8 @@ def expr_list_to_raw_expr_list(
     return [_to_raw_expr(e) for e in expr_list]
 
 
-def sort_or_default(e: Expr | SortExpr) -> expr_internal.SortExpr:
-    """Helper function to return a default Sort if an Expr is provided."""
+def sort_or_default(e: SortKey) -> expr_internal.SortExpr:
+    """Helper function to return a default Sort if an Expr or column name is given."""
     if isinstance(e, SortExpr):
         return e.raw_sort
     return SortExpr(e, ascending=True, nulls_first=True).raw_sort
@@ -436,14 +471,7 @@ def sort_list_to_raw_sort_list(
         sort_list = [sort_list]
     if sort_list is None:
         return None
-    raw_sort_list = []
-    for item in sort_list:
-        if isinstance(item, SortExpr):
-            raw_sort_list.append(sort_or_default(item))
-        else:
-            raw_expr = _to_raw_expr(item)  # may raise ``TypeError``
-            raw_sort_list.append(sort_or_default(Expr(raw_expr)))
-    return raw_sort_list
+    return [sort_or_default(item) for item in sort_list]  # may raise ``TypeError``
 
 
 class Expr:  # noqa: PLW1641
@@ -1710,9 +1738,11 @@ class CaseBuilder:
 class SortExpr:
     """Used to specify sorting on either a DataFrame or function."""
 
-    def __init__(self, expr: Expr, ascending: bool, nulls_first: bool) -> None:
+    def __init__(self, expr: Expr | str, ascending: bool, nulls_first: bool) -> None:
         """This constructor should not be called by the end user."""
-        self.raw_sort = expr_internal.SortExpr(expr.expr, ascending, nulls_first)
+        self.raw_sort = expr_internal.SortExpr(
+            _to_raw_expr(expr), ascending, nulls_first
+        )
 
     def expr(self) -> Expr:
         """Return the raw expr backing the SortExpr."""
