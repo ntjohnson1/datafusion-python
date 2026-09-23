@@ -58,6 +58,17 @@ df.select(
 )
 ```
 
+Window functions take a column name directly as well, for the value being
+computed over and for `partition_by`.
+
+```{code-cell} ipython3
+df.select(
+    col('"Name"'),
+    col('"Speed"'),
+    f.lag('"Speed"').alias("Previous Speed")
+)
+```
+
 ## Setting Parameters
 
 ### Ordering

@@ -41,6 +41,23 @@ The first expression most new users will interact with is the Column, which is c
 This expression represents a column within a DataFrame. The function {py:func}`~datafusion.col` takes as in input a string
 and returns an expression as it's output.
 
+Most functions in {py:mod}`~datafusion.functions` also accept a plain string
+wherever they take the data to operate on, and read it as a column name. These
+two calls build the same expression:
+
+```{code-cell} ipython3
+from datafusion import col, functions as f
+
+total = f.sum("price")
+same_total = f.sum(col("price"))
+```
+
+Arguments that hold a fixed scalar rather than data read a plain string as a
+literal instead. In `f.array_to_string("tags", ",")` the first argument is the
+column `tags` and the second is the string `,`. Reach for {py:func}`~datafusion.col`
+and {py:func}`~datafusion.lit` when you want to be explicit, or when a column name
+needs quoting.
+
 ## Literal
 
 Literal expressions represent a single value. These are helpful in a wide range of operations where

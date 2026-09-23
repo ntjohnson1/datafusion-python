@@ -51,6 +51,16 @@ df.aggregate([col_type_1], [
     f.approx_percentile_cont(col_speed, 0.9).alias("90% Speed")])
 ```
 
+Aggregate functions also take a column name directly, so the calls above can drop
+{py:func}`~datafusion.col`. Column names that need quoting still read more clearly
+through a variable.
+
+```{code-cell} ipython3
+df.aggregate([col_type_1], [
+    f.approx_distinct('"Speed"').alias("Count"),
+    f.approx_median('"Speed"').alias("Median Speed")])
+```
+
 When {code}`group_by` is {code}`None` or an empty list, the aggregation is done over the whole
 {class}`.DataFrame`. For grouping the {code}`group_by` list must contain at least one column.
 
