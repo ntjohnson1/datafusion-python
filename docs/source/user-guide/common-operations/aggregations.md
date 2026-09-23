@@ -52,8 +52,7 @@ df.aggregate([col_type_1], [
 ```
 
 Aggregate functions also take a column name directly, so the calls above can drop
-{py:func}`~datafusion.col`. Column names that need quoting still read more clearly
-through a variable.
+{py:func}`~datafusion.col`.
 
 ```{code-cell} ipython3
 df.aggregate([col_type_1], [

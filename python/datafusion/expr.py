@@ -277,11 +277,15 @@ __all__ = [
     "WindowExpr",
     "WindowFrame",
     "WindowFrameBound",
+    "coerce_to_column",
+    "coerce_to_column_list",
+    "coerce_to_column_or_none",
     "coerce_to_expr",
     "coerce_to_expr_list",
     "coerce_to_expr_or_none",
     "ensure_expr",
     "ensure_expr_list",
+    "ensure_expr_or_none",
 ]
 
 
@@ -306,8 +310,28 @@ def ensure_expr(value: Expr | Any) -> expr_internal.Expr:
         TypeError: If ``value`` is not an instance of :class:`Expr`.
     """
     if not isinstance(value, Expr):
-        raise TypeError(EXPR_TYPE_ERROR)
+        error = f"Expected Expr, found: {type(value).__name__}. {EXPR_TYPE_ERROR}."
+        raise TypeError(error)
     return value.expr
+
+
+def ensure_expr_or_none(value: Expr | Any | None) -> expr_internal.Expr | None:
+    """Return the internal expression from ``Expr``, passing ``None`` through.
+
+    Same as :func:`ensure_expr` but accepts ``None`` for optional parameters.
+
+    Args:
+        value: An ``Expr`` instance, or ``None``.
+
+    Returns:
+        The internal expression representation, or ``None``.
+
+    Raises:
+        TypeError: If ``value`` is neither an :class:`Expr` nor ``None``.
+    """
+    if value is None:
+        return None
+    return ensure_expr(value)
 
 
 def ensure_expr_list(
@@ -387,8 +411,17 @@ def coerce_to_expr_list(values: Iterable[Any]) -> list[Expr]:
     return [coerce_to_expr(value) for value in values]
 
 
-def _to_raw_expr(value: Expr | str) -> expr_internal.Expr:
+def coerce_to_column(value: Expr | str) -> expr_internal.Expr:
     """Convert a Python expression or column name to its raw variant.
+
+    Use this for an argument holding the data being operated on, where a bare
+    string reads as a column name.
+
+    See Also:
+        :func:`coerce_to_expr` — for an argument holding a fixed scalar, where a
+        bare string reads as a literal.
+        :func:`ensure_expr` — for an argument where the two readings are
+        ambiguous, so the caller must be explicit.
 
     Args:
         value: Candidate expression or column name.
@@ -410,10 +443,10 @@ def _to_raw_expr(value: Expr | str) -> expr_internal.Expr:
     raise TypeError(error)
 
 
-def _to_raw_expr_or_none(value: Expr | str | None) -> expr_internal.Expr | None:
+def coerce_to_column_or_none(value: Expr | str | None) -> expr_internal.Expr | None:
     """Convert an optional expression or column name to its raw variant.
 
-    Same as :func:`_to_raw_expr` but passes ``None`` through for optional
+    Same as :func:`coerce_to_column` but passes ``None`` through for optional
     parameters.
 
     Args:
@@ -427,10 +460,10 @@ def _to_raw_expr_or_none(value: Expr | str | None) -> expr_internal.Expr | None:
     """
     if value is None:
         return None
-    return _to_raw_expr(value)
+    return coerce_to_column(value)
 
 
-def _to_raw_expr_list(values: Iterable[Expr | str]) -> list[expr_internal.Expr]:
+def coerce_to_column_list(values: Iterable[Expr | str]) -> list[expr_internal.Expr]:
     """Convert an iterable of expressions or column names to raw expressions.
 
     Args:
@@ -442,7 +475,7 @@ def _to_raw_expr_list(values: Iterable[Expr | str]) -> list[expr_internal.Expr]:
     Raises:
         TypeError: If any item is neither an :class:`Expr` nor ``str``.
     """
-    return [_to_raw_expr(value) for value in values]
+    return [coerce_to_column(value) for value in values]
 
 
 def expr_list_to_raw_expr_list(
@@ -453,7 +486,7 @@ def expr_list_to_raw_expr_list(
         expr_list = [expr_list]
     if expr_list is None:
         return None
-    return [_to_raw_expr(e) for e in expr_list]
+    return [coerce_to_column(e) for e in expr_list]
 
 
 def sort_or_default(e: SortKey) -> expr_internal.SortExpr:
@@ -1741,7 +1774,7 @@ class SortExpr:
     def __init__(self, expr: Expr | str, ascending: bool, nulls_first: bool) -> None:
         """This constructor should not be called by the end user."""
         self.raw_sort = expr_internal.SortExpr(
-            _to_raw_expr(expr), ascending, nulls_first
+            coerce_to_column(expr), ascending, nulls_first
         )
 
     def expr(self) -> Expr:
@@ -1807,7 +1840,7 @@ class GroupingSet:
             :py:meth:`cube`, :py:meth:`grouping_sets`,
             :py:func:`~datafusion.functions.grouping`
         """
-        args = [_to_raw_expr(e) for e in exprs]
+        args = [coerce_to_column(e) for e in exprs]
         return Expr(expr_internal.GroupingSet.rollup(*args))
 
     @staticmethod
@@ -1843,7 +1876,7 @@ class GroupingSet:
             :py:meth:`rollup`, :py:meth:`grouping_sets`,
             :py:func:`~datafusion.functions.grouping`
         """
-        args = [_to_raw_expr(e) for e in exprs]
+        args = [coerce_to_column(e) for e in exprs]
         return Expr(expr_internal.GroupingSet.cube(*args))
 
     @staticmethod
@@ -1886,5 +1919,5 @@ class GroupingSet:
             :py:meth:`rollup`, :py:meth:`cube`,
             :py:func:`~datafusion.functions.grouping`
         """
-        raw_lists = [[_to_raw_expr(e) for e in lst] for lst in expr_lists]
+        raw_lists = [[coerce_to_column(e) for e in lst] for lst in expr_lists]
         return Expr(expr_internal.GroupingSet.grouping_sets(*raw_lists))

@@ -330,15 +330,15 @@ pattern.
 every `*args: Expr` variadic.
 
 ```python
-# Use _to_raw_expr() from expr.py for this pattern
-from datafusion.expr import _to_raw_expr, _to_raw_expr_list, _to_raw_expr_or_none
+# Use coerce_to_column() from expr.py for this pattern
+from datafusion.expr import coerce_to_column, coerce_to_column_list, coerce_to_column_or_none
 
 def sum(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
-    return Expr(f.sum(_to_raw_expr(expression), filter=_to_raw_expr_or_none(filter)))
+    return Expr(f.sum(coerce_to_column(expression), filter=coerce_to_column_or_none(filter)))
 
 
 def coalesce(*args: Expr | str) -> Expr:
-    return Expr(f.coalesce(_to_raw_expr_list(args)))
+    return Expr(f.coalesce(coerce_to_column_list(args)))
 ```
 
 **Category A or Category C?** Ask what the argument *is*, not what type it has:
@@ -358,6 +358,17 @@ stays explicit. To find the whole set, list the parameters whose annotation is
 exactly `Expr`, `Expr | None`, or `list[Expr]` — no other argument in either
 module is still `Expr`-only. (`Expr | Callable[..., Any]` is a lambda
 parameter, not one of these.)
+
+These arguments must still unwrap through `ensure_expr()` (or
+`ensure_expr_or_none()` / a comprehension for lists) rather than a bare
+`arg.expr`. Now that nearly every other argument takes a string, callers will
+try one here too, and `ensure_expr` answers with a `TypeError` naming the type
+and both wrappers instead of leaking `'str' object has no attribute 'expr'`:
+
+```python
+def array_append(array: Expr | str, element: Expr) -> Expr:
+    return Expr(f.array_append(coerce_to_column(array), ensure_expr(element)))
+```
 
 ## Implementation Steps
 
@@ -430,25 +441,36 @@ python -m pytest python/tests/test_functions.py -v
 
 ## Coercion Helper Pattern
 
-Use the coercion helpers from `datafusion.expr` to convert native Python values to `Expr`. These are the complement of `ensure_expr()` — where `ensure_expr` *rejects* non-`Expr` values, the coercion helpers *wrap* them via `Expr.literal()`.
+`datafusion.expr` has one helper family per category, and picking the right one
+*is* the decision the categories describe:
+
+| Helper | Argument holds | A bare `str` becomes |
+| --- | --- | --- |
+| `coerce_to_column` | the data being operated on | a column reference |
+| `coerce_to_expr` | a fixed scalar | a literal |
+| `ensure_expr` | a value compared against the data | a `TypeError` |
+
+Each has `_or_none` and `_list` variants for optional and variadic parameters.
+`coerce_to_column` and `ensure_expr` return the raw internal expression;
+`coerce_to_expr` returns an `Expr`, so it still needs `.expr` at the call.
 
 **For required parameters** use `coerce_to_expr`:
 
 ```python
-from datafusion.expr import coerce_to_expr
+from datafusion.expr import coerce_to_column, coerce_to_expr
 
-def left(string: Expr, n: Expr | int) -> Expr:
+def left(string: Expr | str, n: Expr | int) -> Expr:
     n = coerce_to_expr(n)
-    return Expr(f.left(string.expr, n.expr))
+    return Expr(f.left(coerce_to_column(string), n.expr))
 ```
 
 **For optional nullable parameters** use `coerce_to_expr_or_none`:
 
 ```python
-from datafusion.expr import coerce_to_expr, coerce_to_expr_or_none
+from datafusion.expr import coerce_to_column, coerce_to_expr, coerce_to_expr_or_none
 
 def regexp_count(
-    string: Expr,
+    string: Expr | str,
     pattern: Expr | str,
     start: Expr | int | None = None,
     flags: Expr | str | None = None,
@@ -458,7 +480,7 @@ def regexp_count(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_count(
-            string.expr,
+            coerce_to_column(string),
             pattern.expr,
             start.expr if start is not None else None,
             flags.expr if flags is not None else None,
@@ -466,10 +488,10 @@ def regexp_count(
     )
 ```
 
-Both helpers are defined in `python/datafusion/expr.py` alongside `ensure_expr`. Import them in `functions.py` via:
+All of them are defined in `python/datafusion/expr.py`. Import what the signature needs:
 
 ```python
-from datafusion.expr import coerce_to_expr, coerce_to_expr_or_none
+from datafusion.expr import coerce_to_column, coerce_to_expr, coerce_to_expr_or_none
 ```
 
 ## What NOT to Change

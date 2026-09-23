@@ -37,9 +37,9 @@ import pyarrow as pa
 from datafusion._internal import functions as _functions
 from datafusion.expr import (
     Expr,
-    _to_raw_expr,
-    _to_raw_expr_list,
-    _to_raw_expr_or_none,
+    coerce_to_column,
+    coerce_to_column_list,
+    coerce_to_column_or_none,
     coerce_to_expr,
     sort_list_to_raw_sort_list,
 )
@@ -52,10 +52,6 @@ _f = _functions.spark
 
 # Reused int32 literal so optional-arg defaults don't rebuild it per call.
 _ZERO_I32 = Expr.literal(pa.scalar(0, type=pa.int32()))
-
-
-def _filter_raw(filter: Expr | str | None) -> Any:
-    return _to_raw_expr_or_none(filter)
 
 
 def _coerce_i32(value: Expr | int | None) -> Expr | None:
@@ -99,9 +95,9 @@ def avg(
     """
     return Expr(
         _f.avg(
-            _to_raw_expr(col),
+            coerce_to_column(col),
             distinct=distinct,
-            filter=_filter_raw(filter),
+            filter=coerce_to_column_or_none(filter),
             order_by=sort_list_to_raw_sort_list(order_by),
             null_treatment=null_treatment,
         )
@@ -126,9 +122,9 @@ def try_sum(
     """
     return Expr(
         _f.try_sum(
-            _to_raw_expr(col),
+            coerce_to_column(col),
             distinct=distinct,
-            filter=_filter_raw(filter),
+            filter=coerce_to_column_or_none(filter),
             order_by=sort_list_to_raw_sort_list(order_by),
             null_treatment=null_treatment,
         )
@@ -153,9 +149,9 @@ def collect_list(
     """
     return Expr(
         _f.collect_list(
-            _to_raw_expr(col),
+            coerce_to_column(col),
             distinct=distinct,
-            filter=_filter_raw(filter),
+            filter=coerce_to_column_or_none(filter),
             order_by=sort_list_to_raw_sort_list(order_by),
             null_treatment=null_treatment,
         )
@@ -180,9 +176,9 @@ def collect_set(
     """
     return Expr(
         _f.collect_set(
-            _to_raw_expr(col),
+            coerce_to_column(col),
             distinct=distinct,
-            filter=_filter_raw(filter),
+            filter=coerce_to_column_or_none(filter),
             order_by=sort_list_to_raw_sort_list(order_by),
             null_treatment=null_treatment,
         )
@@ -210,7 +206,7 @@ def array_contains(col: Expr | str, value: Expr | Any) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         True
     """
-    return Expr(_f.array_contains(_to_raw_expr(col), coerce_to_expr(value).expr))
+    return Expr(_f.array_contains(coerce_to_column(col), coerce_to_expr(value).expr))
 
 
 def array(*cols: Expr | str) -> Expr:
@@ -227,7 +223,7 @@ def array(*cols: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         [1, 2, 3]
     """
-    return Expr(_f.array(*_to_raw_expr_list(cols)))
+    return Expr(_f.array(*coerce_to_column_list(cols)))
 
 
 def shuffle(col: Expr | str, seed: int | None = None) -> Expr:
@@ -250,7 +246,7 @@ def shuffle(col: Expr | str, seed: int | None = None) -> Expr:
     if seed is not None:
         msg = "shuffle(seed=...) is not yet supported by the Spark UDF binding"
         raise NotImplementedError(msg)
-    return Expr(_f.shuffle(_to_raw_expr(col)))
+    return Expr(_f.shuffle(coerce_to_column(col)))
 
 
 def array_repeat(col: Expr | str, count: Expr | int) -> Expr:
@@ -266,7 +262,7 @@ def array_repeat(col: Expr | str, count: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         ['a', 'a', 'a']
     """
-    return Expr(_f.array_repeat(_to_raw_expr(col), coerce_to_expr(count).expr))
+    return Expr(_f.array_repeat(coerce_to_column(col), coerce_to_expr(count).expr))
 
 
 def slice(x: Expr | str, start: Expr | int, length: Expr | int) -> Expr:
@@ -284,7 +280,7 @@ def slice(x: Expr | str, start: Expr | int, length: Expr | int) -> Expr:
     """
     return Expr(
         _f.slice(
-            _to_raw_expr(x), coerce_to_expr(start).expr, coerce_to_expr(length).expr
+            coerce_to_column(x), coerce_to_expr(start).expr, coerce_to_expr(length).expr
         )
     )
 
@@ -305,7 +301,7 @@ def bitmap_count(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         8
     """
-    return Expr(_f.bitmap_count(_to_raw_expr(col)))
+    return Expr(_f.bitmap_count(coerce_to_column(col)))
 
 
 def bitmap_bit_position(col: Expr | str) -> Expr:
@@ -319,7 +315,7 @@ def bitmap_bit_position(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         14
     """
-    return Expr(_f.bitmap_bit_position(_to_raw_expr(col)))
+    return Expr(_f.bitmap_bit_position(coerce_to_column(col)))
 
 
 def bitmap_bucket_number(col: Expr | str) -> Expr:
@@ -333,7 +329,7 @@ def bitmap_bucket_number(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1
     """
-    return Expr(_f.bitmap_bucket_number(_to_raw_expr(col)))
+    return Expr(_f.bitmap_bucket_number(coerce_to_column(col)))
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +351,7 @@ def bit_get(col: Expr | str, pos: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1
     """
-    return Expr(_f.bit_get(_to_raw_expr(col), _to_raw_expr(pos)))
+    return Expr(_f.bit_get(coerce_to_column(col), coerce_to_column(pos)))
 
 
 def bit_count(col: Expr | str) -> Expr:
@@ -368,7 +364,7 @@ def bit_count(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         3
     """
-    return Expr(_f.bit_count(_to_raw_expr(col)))
+    return Expr(_f.bit_count(coerce_to_column(col)))
 
 
 def bitwise_not(col: Expr | str) -> Expr:
@@ -381,7 +377,7 @@ def bitwise_not(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         -1
     """
-    return Expr(_f.bitwise_not(_to_raw_expr(col)))
+    return Expr(_f.bitwise_not(coerce_to_column(col)))
 
 
 def shiftleft(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -397,7 +393,7 @@ def shiftleft(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         8
     """
-    return Expr(_f.shiftleft(_to_raw_expr(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.shiftleft(coerce_to_column(col), coerce_to_expr(numBits).expr))
 
 
 def shiftright(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -413,7 +409,7 @@ def shiftright(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         2
     """
-    return Expr(_f.shiftright(_to_raw_expr(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.shiftright(coerce_to_column(col), coerce_to_expr(numBits).expr))
 
 
 def shiftrightunsigned(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -429,7 +425,9 @@ def shiftrightunsigned(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N
         >>> r.collect_column("v")[0].as_py()
         2
     """
-    return Expr(_f.shiftrightunsigned(_to_raw_expr(col), coerce_to_expr(numBits).expr))
+    return Expr(
+        _f.shiftrightunsigned(coerce_to_column(col), coerce_to_expr(numBits).expr)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +449,7 @@ def size(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         3
     """
-    return Expr(_f.size(_to_raw_expr(col)))
+    return Expr(_f.size(coerce_to_column(col)))
 
 
 def if_(condition: Expr | str, if_true: Expr | Any, if_false: Expr | Any) -> Expr:
@@ -473,7 +471,7 @@ def if_(condition: Expr | str, if_true: Expr | Any, if_false: Expr | Any) -> Exp
     """
     return Expr(
         _f.if_(
-            _to_raw_expr(condition),
+            coerce_to_column(condition),
             coerce_to_expr(if_true).expr,
             coerce_to_expr(if_false).expr,
         )
@@ -499,7 +497,7 @@ def spark_cast(arg: Expr | str, type_str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py().isoformat()
         '2020-01-15T14:30:45+00:00'
     """
-    return Expr(_f.spark_cast(_to_raw_expr(arg), coerce_to_expr(type_str).expr))
+    return Expr(_f.spark_cast(coerce_to_column(arg), coerce_to_expr(type_str).expr))
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +520,7 @@ def add_months(start: Expr | str, months: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 3, 15)
     """
-    return Expr(_f.add_months(_to_raw_expr(start), _coerce_i32(months).expr))
+    return Expr(_f.add_months(coerce_to_column(start), _coerce_i32(months).expr))
 
 
 def date_add(start: Expr | str, days: Expr | int) -> Expr:
@@ -540,7 +538,7 @@ def date_add(start: Expr | str, days: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 20)
     """
-    return Expr(_f.date_add(_to_raw_expr(start), _coerce_i32(days).expr))
+    return Expr(_f.date_add(coerce_to_column(start), _coerce_i32(days).expr))
 
 
 def date_sub(start: Expr | str, days: Expr | int) -> Expr:
@@ -558,7 +556,7 @@ def date_sub(start: Expr | str, days: Expr | int) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 10)
     """
-    return Expr(_f.date_sub(_to_raw_expr(start), _coerce_i32(days).expr))
+    return Expr(_f.date_sub(coerce_to_column(start), _coerce_i32(days).expr))
 
 
 def hour(col: Expr | str) -> Expr:
@@ -576,7 +574,7 @@ def hour(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         14
     """
-    return Expr(_f.hour(_to_raw_expr(col)))
+    return Expr(_f.hour(coerce_to_column(col)))
 
 
 def minute(col: Expr | str) -> Expr:
@@ -594,7 +592,7 @@ def minute(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         30
     """
-    return Expr(_f.minute(_to_raw_expr(col)))
+    return Expr(_f.minute(coerce_to_column(col)))
 
 
 def second(col: Expr | str) -> Expr:
@@ -612,7 +610,7 @@ def second(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         45
     """
-    return Expr(_f.second(_to_raw_expr(col)))
+    return Expr(_f.second(coerce_to_column(col)))
 
 
 def last_day(col: Expr | str) -> Expr:
@@ -628,7 +626,7 @@ def last_day(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 31)
     """
-    return Expr(_f.last_day(_to_raw_expr(col)))
+    return Expr(_f.last_day(coerce_to_column(col)))
 
 
 def make_dt_interval(
@@ -722,7 +720,7 @@ def next_day(date: Expr | str, dayOfWeek: Expr | str) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 20)
     """
-    return Expr(_f.next_day(_to_raw_expr(date), coerce_to_expr(dayOfWeek).expr))
+    return Expr(_f.next_day(coerce_to_column(date), coerce_to_expr(dayOfWeek).expr))
 
 
 def date_diff(end: Expr | str, start: Expr | str) -> Expr:
@@ -739,7 +737,7 @@ def date_diff(end: Expr | str, start: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         5
     """
-    return Expr(_f.date_diff(_to_raw_expr(end), _to_raw_expr(start)))
+    return Expr(_f.date_diff(coerce_to_column(end), coerce_to_column(start)))
 
 
 def date_trunc(format: Expr | str, timestamp: Expr | str) -> Expr:
@@ -760,7 +758,7 @@ def date_trunc(format: Expr | str, timestamp: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.datetime(2020, 1, 1, 0, 0)
     """
-    return Expr(_f.date_trunc(coerce_to_expr(format).expr, _to_raw_expr(timestamp)))
+    return Expr(_f.date_trunc(coerce_to_expr(format).expr, coerce_to_column(timestamp)))
 
 
 def time_trunc(unit: Expr | str, time: Expr | str) -> Expr:
@@ -780,7 +778,7 @@ def time_trunc(unit: Expr | str, time: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.time(14, 0)
     """
-    return Expr(_f.time_trunc(_to_raw_expr(unit), _to_raw_expr(time)))
+    return Expr(_f.time_trunc(coerce_to_column(unit), coerce_to_column(time)))
 
 
 def trunc(date: Expr | str, format: Expr | str) -> Expr:
@@ -798,7 +796,7 @@ def trunc(date: Expr | str, format: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.date(2020, 1, 1)
     """
-    return Expr(_f.trunc(_to_raw_expr(date), coerce_to_expr(format).expr))
+    return Expr(_f.trunc(coerce_to_column(date), coerce_to_expr(format).expr))
 
 
 def date_part(field: Expr | str, source: Expr | str) -> Expr:
@@ -817,7 +815,7 @@ def date_part(field: Expr | str, source: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2020
     """
-    return Expr(_f.date_part(coerce_to_expr(field).expr, _to_raw_expr(source)))
+    return Expr(_f.date_part(coerce_to_expr(field).expr, coerce_to_column(source)))
 
 
 def from_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
@@ -838,7 +836,9 @@ def from_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.datetime(2020, 1, 15, 14, 30, 45)
     """
-    return Expr(_f.from_utc_timestamp(_to_raw_expr(timestamp), coerce_to_expr(tz).expr))
+    return Expr(
+        _f.from_utc_timestamp(coerce_to_column(timestamp), coerce_to_expr(tz).expr)
+    )
 
 
 def to_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
@@ -859,7 +859,9 @@ def to_utc_timestamp(timestamp: Expr | str, tz: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         datetime.datetime(2020, 1, 15, 14, 30, 45)
     """
-    return Expr(_f.to_utc_timestamp(_to_raw_expr(timestamp), coerce_to_expr(tz).expr))
+    return Expr(
+        _f.to_utc_timestamp(coerce_to_column(timestamp), coerce_to_expr(tz).expr)
+    )
 
 
 def unix_date(col: Expr | str) -> Expr:
@@ -875,7 +877,7 @@ def unix_date(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         18276
     """
-    return Expr(_f.unix_date(_to_raw_expr(col)))
+    return Expr(_f.unix_date(coerce_to_column(col)))
 
 
 def unix_micros(col: Expr | str) -> Expr:
@@ -893,7 +895,7 @@ def unix_micros(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1579098645000000
     """
-    return Expr(_f.unix_micros(_to_raw_expr(col)))
+    return Expr(_f.unix_micros(coerce_to_column(col)))
 
 
 def unix_millis(col: Expr | str) -> Expr:
@@ -911,7 +913,7 @@ def unix_millis(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1579098645000
     """
-    return Expr(_f.unix_millis(_to_raw_expr(col)))
+    return Expr(_f.unix_millis(coerce_to_column(col)))
 
 
 def unix_seconds(col: Expr | str) -> Expr:
@@ -929,7 +931,7 @@ def unix_seconds(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1579098645
     """
-    return Expr(_f.unix_seconds(_to_raw_expr(col)))
+    return Expr(_f.unix_seconds(coerce_to_column(col)))
 
 
 # ---------------------------------------------------------------------------
@@ -947,7 +949,7 @@ def crc32(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2743272264
     """
-    return Expr(_f.crc32(_to_raw_expr(col)))
+    return Expr(_f.crc32(coerce_to_column(col)))
 
 
 def sha1(col: Expr | str) -> Expr:
@@ -960,7 +962,7 @@ def sha1(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d'
     """
-    return Expr(_f.sha1(_to_raw_expr(col)))
+    return Expr(_f.sha1(coerce_to_column(col)))
 
 
 def sha2(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
@@ -975,7 +977,7 @@ def sha2(col: Expr | str, numBits: Expr | int) -> Expr:  # noqa: N803
         >>> r.collect_column("v")[0].as_py()
         '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
     """
-    return Expr(_f.sha2(_to_raw_expr(col), coerce_to_expr(numBits).expr))
+    return Expr(_f.sha2(coerce_to_column(col), coerce_to_expr(numBits).expr))
 
 
 def xxhash64(*cols: Expr | str) -> Expr:
@@ -989,7 +991,7 @@ def xxhash64(*cols: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         -4367754540140381902
     """
-    return Expr(_f.xxhash64(*_to_raw_expr_list(cols)))
+    return Expr(_f.xxhash64(*coerce_to_column_list(cols)))
 
 
 # ---------------------------------------------------------------------------
@@ -1014,7 +1016,7 @@ def json_tuple(col: Expr | str, *fields: Expr | str) -> Expr:
         {'c0': '1', 'c1': 'x'}
     """
     return Expr(
-        _f.json_tuple(_to_raw_expr(col), *[coerce_to_expr(f).expr for f in fields])
+        _f.json_tuple(coerce_to_column(col), *[coerce_to_expr(f).expr for f in fields])
     )
 
 
@@ -1036,7 +1038,7 @@ def map_from_arrays(col1: Expr | str, col2: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         [('a', 1), ('b', 2)]
     """
-    return Expr(_f.map_from_arrays(_to_raw_expr(col1), _to_raw_expr(col2)))
+    return Expr(_f.map_from_arrays(coerce_to_column(col1), coerce_to_column(col2)))
 
 
 def map_from_entries(col: Expr | str) -> Expr:
@@ -1058,7 +1060,7 @@ def map_from_entries(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         [('a', 1), ('b', 2)]
     """
-    return Expr(_f.map_from_entries(_to_raw_expr(col)))
+    return Expr(_f.map_from_entries(coerce_to_column(col)))
 
 
 def str_to_map(
@@ -1091,13 +1093,15 @@ def str_to_map(
         >>> r.collect_column("v")[0].as_py()
         [('a', '1'), ('b', '2')]
     """
-    pd = _to_raw_expr(pairDelim) if pairDelim is not None else Expr.literal(",").expr
+    pd = (
+        coerce_to_column(pairDelim) if pairDelim is not None else Expr.literal(",").expr
+    )
     kvd = (
-        _to_raw_expr(keyValueDelim)
+        coerce_to_column(keyValueDelim)
         if keyValueDelim is not None
         else Expr.literal(":").expr
     )
-    return Expr(_f.str_to_map(_to_raw_expr(text), pd, kvd))
+    return Expr(_f.str_to_map(coerce_to_column(text), pd, kvd))
 
 
 # ---------------------------------------------------------------------------
@@ -1115,7 +1119,7 @@ def abs(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         5
     """
-    return Expr(_f.abs(_to_raw_expr(col)))
+    return Expr(_f.abs(coerce_to_column(col)))
 
 
 def ceil(col: Expr | str) -> Expr:
@@ -1128,7 +1132,7 @@ def ceil(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2
     """
-    return Expr(_f.ceil(_to_raw_expr(col)))
+    return Expr(_f.ceil(coerce_to_column(col)))
 
 
 def expm1(col: Expr | str) -> Expr:
@@ -1141,7 +1145,7 @@ def expm1(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         0.0
     """
-    return Expr(_f.expm1(_to_raw_expr(col)))
+    return Expr(_f.expm1(coerce_to_column(col)))
 
 
 def factorial(col: Expr | str) -> Expr:
@@ -1159,7 +1163,7 @@ def factorial(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         120
     """
-    return Expr(_f.factorial(_to_raw_expr(col)))
+    return Expr(_f.factorial(coerce_to_column(col)))
 
 
 def floor(col: Expr | str) -> Expr:
@@ -1172,7 +1176,7 @@ def floor(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1
     """
-    return Expr(_f.floor(_to_raw_expr(col)))
+    return Expr(_f.floor(coerce_to_column(col)))
 
 
 def hex(col: Expr | str) -> Expr:
@@ -1185,7 +1189,7 @@ def hex(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'FF'
     """
-    return Expr(_f.hex(_to_raw_expr(col)))
+    return Expr(_f.hex(coerce_to_column(col)))
 
 
 def modulus(dividend: Expr | float, divisor: Expr | float) -> Expr:
@@ -1230,7 +1234,7 @@ def rint(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         2.0
     """
-    return Expr(_f.rint(_to_raw_expr(col)))
+    return Expr(_f.rint(coerce_to_column(col)))
 
 
 def round(col: Expr | str, scale: Expr | int | None = None) -> Expr:
@@ -1252,7 +1256,7 @@ def round(col: Expr | str, scale: Expr | int | None = None) -> Expr:
         2.35
     """
     scale_expr = coerce_to_expr(scale) if scale is not None else _ZERO_I32
-    return Expr(_f.round(_to_raw_expr(col), scale_expr.expr))
+    return Expr(_f.round(coerce_to_column(col), scale_expr.expr))
 
 
 def unhex(col: Expr | str) -> Expr:
@@ -1265,7 +1269,7 @@ def unhex(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         b'\xff'
     """
-    return Expr(_f.unhex(_to_raw_expr(col)))
+    return Expr(_f.unhex(coerce_to_column(col)))
 
 
 def width_bucket(
@@ -1291,9 +1295,9 @@ def width_bucket(
     """
     return Expr(
         _f.width_bucket(
-            _to_raw_expr(v),
-            _to_raw_expr(min),
-            _to_raw_expr(max),
+            coerce_to_column(v),
+            coerce_to_column(min),
+            coerce_to_column(max),
             coerce_to_expr(numBucket).expr,
         )
     )
@@ -1309,7 +1313,7 @@ def csc(col: Expr | str) -> Expr:
         >>> f"{r.collect_column('v')[0].as_py():.4f}"
         '1.0000'
     """
-    return Expr(_f.csc(_to_raw_expr(col)))
+    return Expr(_f.csc(coerce_to_column(col)))
 
 
 def sec(col: Expr | str) -> Expr:
@@ -1322,7 +1326,7 @@ def sec(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         1.0
     """
-    return Expr(_f.sec(_to_raw_expr(col)))
+    return Expr(_f.sec(coerce_to_column(col)))
 
 
 def negative(col: Expr | str) -> Expr:
@@ -1335,7 +1339,7 @@ def negative(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         -3
     """
-    return Expr(_f.negative(_to_raw_expr(col)))
+    return Expr(_f.negative(coerce_to_column(col)))
 
 
 def bin(col: Expr | str) -> Expr:
@@ -1348,7 +1352,7 @@ def bin(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         '111'
     """
-    return Expr(_f.bin(_to_raw_expr(col)))
+    return Expr(_f.bin(coerce_to_column(col)))
 
 
 # ---------------------------------------------------------------------------
@@ -1366,7 +1370,7 @@ def ascii(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         65
     """
-    return Expr(_f.ascii(_to_raw_expr(col)))
+    return Expr(_f.ascii(coerce_to_column(col)))
 
 
 def base64(col: Expr | str) -> Expr:
@@ -1379,7 +1383,7 @@ def base64(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'aGk='
     """
-    return Expr(_f.base64(_to_raw_expr(col)))
+    return Expr(_f.base64(coerce_to_column(col)))
 
 
 def char(col: Expr | str) -> Expr:
@@ -1392,7 +1396,7 @@ def char(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'A'
     """
-    return Expr(_f.char(_to_raw_expr(col)))
+    return Expr(_f.char(coerce_to_column(col)))
 
 
 def concat(*cols: Expr | str) -> Expr:
@@ -1406,7 +1410,7 @@ def concat(*cols: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'ab'
     """
-    return Expr(_f.concat(*_to_raw_expr_list(cols)))
+    return Expr(_f.concat(*coerce_to_column_list(cols)))
 
 
 def elt(*inputs: Expr | str) -> Expr:
@@ -1423,7 +1427,7 @@ def elt(*inputs: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'b'
     """
-    return Expr(_f.elt(*_to_raw_expr_list(inputs)))
+    return Expr(_f.elt(*coerce_to_column_list(inputs)))
 
 
 def ilike(
@@ -1449,7 +1453,7 @@ def ilike(
     if escapeChar is not None:
         msg = "ilike(escapeChar=...) is not yet supported by the Spark UDF binding"
         raise NotImplementedError(msg)
-    return Expr(_f.ilike(_to_raw_expr(str), _to_raw_expr(pattern)))
+    return Expr(_f.ilike(coerce_to_column(str), coerce_to_column(pattern)))
 
 
 def length(col: Expr | str) -> Expr:
@@ -1462,7 +1466,7 @@ def length(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         5
     """
-    return Expr(_f.length(_to_raw_expr(col)))
+    return Expr(_f.length(coerce_to_column(col)))
 
 
 def like(
@@ -1488,7 +1492,7 @@ def like(
     if escapeChar is not None:
         msg = "like(escapeChar=...) is not yet supported by the Spark UDF binding"
         raise NotImplementedError(msg)
-    return Expr(_f.like(_to_raw_expr(str), _to_raw_expr(pattern)))
+    return Expr(_f.like(coerce_to_column(str), coerce_to_column(pattern)))
 
 
 def luhn_check(col: Expr | str) -> Expr:
@@ -1505,7 +1509,7 @@ def luhn_check(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         True
     """
-    return Expr(_f.luhn_check(_to_raw_expr(col)))
+    return Expr(_f.luhn_check(coerce_to_column(col)))
 
 
 def format_string(format: str | Expr, *cols: Expr | str) -> Expr:
@@ -1526,7 +1530,7 @@ def format_string(format: str | Expr, *cols: Expr | str) -> Expr:
         '42-hi'
     """
     fmt_expr = format if isinstance(format, Expr) else Expr.literal(format)
-    return Expr(_f.format_string(fmt_expr.expr, *_to_raw_expr_list(cols)))
+    return Expr(_f.format_string(fmt_expr.expr, *coerce_to_column_list(cols)))
 
 
 def space(col: Expr | int) -> Expr:
@@ -1560,7 +1564,7 @@ def substring(str: Expr | str, pos: Expr | int, len: Expr | int) -> Expr:
     """
     return Expr(
         _f.substring(
-            _to_raw_expr(str), coerce_to_expr(pos).expr, coerce_to_expr(len).expr
+            coerce_to_column(str), coerce_to_expr(pos).expr, coerce_to_expr(len).expr
         )
     )
 
@@ -1576,7 +1580,7 @@ def unbase64(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         b'hi'
     """
-    return Expr(_f.unbase64(_to_raw_expr(col)))
+    return Expr(_f.unbase64(coerce_to_column(col)))
 
 
 def soundex(col: Expr | str) -> Expr:
@@ -1589,7 +1593,7 @@ def soundex(col: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'R163'
     """
-    return Expr(_f.soundex(_to_raw_expr(col)))
+    return Expr(_f.soundex(coerce_to_column(col)))
 
 
 def is_valid_utf8(str: Expr | str) -> Expr:
@@ -1603,7 +1607,7 @@ def is_valid_utf8(str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         True
     """
-    return Expr(_f.is_valid_utf8(_to_raw_expr(str)))
+    return Expr(_f.is_valid_utf8(coerce_to_column(str)))
 
 
 def make_valid_utf8(str: Expr | str) -> Expr:
@@ -1617,7 +1621,7 @@ def make_valid_utf8(str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'hello'
     """
-    return Expr(_f.make_valid_utf8(_to_raw_expr(str)))
+    return Expr(_f.make_valid_utf8(coerce_to_column(str)))
 
 
 # ---------------------------------------------------------------------------
@@ -1660,9 +1664,15 @@ def parse_url(
         '1'
     """
     if key is None:
-        return Expr(_f.parse_url(_to_raw_expr(url), _to_raw_expr(partToExtract)))
+        return Expr(
+            _f.parse_url(coerce_to_column(url), coerce_to_column(partToExtract))
+        )
     return Expr(
-        _f.parse_url(_to_raw_expr(url), _to_raw_expr(partToExtract), _to_raw_expr(key))
+        _f.parse_url(
+            coerce_to_column(url),
+            coerce_to_column(partToExtract),
+            coerce_to_column(key),
+        )
     )
 
 
@@ -1688,10 +1698,14 @@ def try_parse_url(
         'example.com'
     """
     if key is None:
-        return Expr(_f.try_parse_url(_to_raw_expr(url), _to_raw_expr(partToExtract)))
+        return Expr(
+            _f.try_parse_url(coerce_to_column(url), coerce_to_column(partToExtract))
+        )
     return Expr(
         _f.try_parse_url(
-            _to_raw_expr(url), _to_raw_expr(partToExtract), _to_raw_expr(key)
+            coerce_to_column(url),
+            coerce_to_column(partToExtract),
+            coerce_to_column(key),
         )
     )
 
@@ -1707,7 +1721,7 @@ def url_decode(str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'a b'
     """
-    return Expr(_f.url_decode(_to_raw_expr(str)))
+    return Expr(_f.url_decode(coerce_to_column(str)))
 
 
 def try_url_decode(str: Expr | str) -> Expr:
@@ -1721,7 +1735,7 @@ def try_url_decode(str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'a b'
     """
-    return Expr(_f.try_url_decode(_to_raw_expr(str)))
+    return Expr(_f.try_url_decode(coerce_to_column(str)))
 
 
 def url_encode(str: Expr | str) -> Expr:
@@ -1735,7 +1749,7 @@ def url_encode(str: Expr | str) -> Expr:
         >>> r.collect_column("v")[0].as_py()
         'a+b'
     """
-    return Expr(_f.url_encode(_to_raw_expr(str)))
+    return Expr(_f.url_encode(coerce_to_column(str)))
 
 
 __all__ = [

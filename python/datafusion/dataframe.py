@@ -67,7 +67,7 @@ from datafusion.expr import (
     Expr,
     SortExpr,
     SortKey,
-    _to_raw_expr,
+    coerce_to_column,
     ensure_expr,
     ensure_expr_list,
     expr_list_to_raw_expr_list,
@@ -1476,7 +1476,7 @@ class DataFrame:
             >>> df.sort_by("a").to_pydict()
             {'a': [1, 2, 3]}
         """
-        raw = [_to_raw_expr(e) for e in exprs]
+        raw = [coerce_to_column(e) for e in exprs]
         return DataFrame(self.df.sort_by(raw))
 
     def write_csv(

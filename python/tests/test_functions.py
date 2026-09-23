@@ -2441,31 +2441,46 @@ class TestPythonicNativeTypes:
         ).collect()
         assert result[0].column(0)[0].as_py() == "b"
 
+    def test_column_name_and_literal_arguments_coexist(self, df):
+        """A data argument reads a string as a column; a scalar one as a literal."""
+        joined = df.select(
+            f.array_to_string(f.make_array("a", "c"), "-").alias("joined")
+        )
+        assert joined.collect_column("joined")[0].as_py() == "Hello-hello "
 
-def test_column_name_and_literal_arguments_coexist(df):
-    """A data argument reads a string as a column; a scalar one as a literal."""
-    joined = df.select(f.array_to_string(f.make_array("a", "c"), "-").alias("joined"))
-    assert joined.collect_column("joined")[0].as_py() == "Hello-hello "
+    @pytest.mark.parametrize(
+        "call",
+        [
+            pytest.param(lambda: f.array_append(column("a"), "urgent"), id="element"),
+            pytest.param(lambda: f.array_replace(column("a"), "x", "y"), id="from_val"),
+            pytest.param(lambda: f.map_extract(column("a"), "k"), id="key"),
+            pytest.param(lambda: f.when(column("a"), "big"), id="then"),
+            pytest.param(lambda: f.in_list(column("a"), ["x"]), id="values"),
+            pytest.param(lambda: f.range(0, 5, 1), id="range"),
+        ],
+    )
+    def test_value_like_args_still_require_expr(self, call):
+        """A value compared against the data is ambiguous, so it stays explicit.
 
+        The rejection names the offending type and both wrappers, rather than
+        leaking ``'str' object has no attribute 'expr'``.
+        """
+        with pytest.raises(TypeError, match=r"Expected Expr, found: (str|int)"):
+            call()
 
-def test_value_like_args_still_require_expr():
-    """``element`` is compared against the data, so it is not a column name."""
-    with pytest.raises(AttributeError):
-        f.array_append(column("a"), "urgent")
+    def test_a_string_is_never_silently_a_literal(self, df):
+        """Every argument of ``concat`` is data, so a bare separator is a column."""
+        with pytest.raises(Exception, match='No field named "-"'):
+            df.select(f.concat("a", "-", "c")).collect()
 
+    def test_mean_forwards_its_filter(self, df):
+        """``mean`` aliases ``avg``, whose second parameter is ``distinct``."""
+        filtered = df.aggregate([], [f.mean("b", filter="e").alias("v")])
+        unfiltered = df.aggregate([], [f.mean("b").alias("v")])
+        assert filtered.collect_column("v")[0].as_py() == 5.5
+        assert unfiltered.collect_column("v")[0].as_py() == 5.0
 
-def test_a_string_is_never_silently_a_literal(df):
-    """Every argument of ``concat`` is data, so a bare separator is a column."""
-    with pytest.raises(Exception, match="-"):
-        df.select(f.concat("a", "-", "c")).collect()
-
-
-def test_mean_forwards_its_filter(df):
-    """``mean`` aliases ``avg``, whose second parameter is ``distinct``."""
-    assert str(f.mean("b", filter="e")) == str(f.avg("b", filter="e"))
-
-
-@pytest.mark.parametrize("bad", [3, 1.5, None, object()])
-def test_non_expr_argument_rejected(bad):
-    with pytest.raises(TypeError, match="Expected Expr or column name"):
-        f.sum(bad)
+    @pytest.mark.parametrize("bad", [3, 1.5, None, object()])
+    def test_non_expr_argument_rejected(self, bad):
+        with pytest.raises(TypeError, match="Expected Expr or column name"):
+            f.sum(bad)

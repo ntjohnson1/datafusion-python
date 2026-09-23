@@ -27,9 +27,12 @@ imported as ``F`` so calls read like ``F.sum("price")``.
 
 Arguments that hold the data being operated on also accept a plain string, which
 is read as a column name: ``F.sum("price")`` is the same as
-``F.sum(col("price"))``. Arguments that hold a fixed scalar instead read a plain
-string as a literal, so ``F.array_to_string("tags", ",")`` joins the values of
-column ``tags`` with a comma.
+``F.sum(datafusion.col("price"))``. Arguments that hold a fixed scalar instead
+read a plain string as a literal, so ``F.array_to_string("tags", ",")`` joins the
+values of column ``tags`` with a comma. Arguments holding a value compared
+*against* the data -- ``element`` in :py:func:`array_append`, ``key`` in
+:py:func:`map_extract` -- are ambiguous either way, so they still require an
+explicit :py:func:`~datafusion.col` or :py:func:`~datafusion.lit`.
 
 Examples:
     >>> from datafusion import functions as F
@@ -51,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 from datafusion._internal import functions as f
 from datafusion.common import NullTreatment
@@ -60,12 +63,14 @@ from datafusion.expr import (
     Expr,
     SortExpr,
     SortKey,
-    _to_raw_expr,
-    _to_raw_expr_list,
-    _to_raw_expr_or_none,
+    coerce_to_column,
+    coerce_to_column_list,
+    coerce_to_column_or_none,
     coerce_to_expr,
     coerce_to_expr_list,
     coerce_to_expr_or_none,
+    ensure_expr,
+    ensure_expr_or_none,
     expr_list_to_raw_expr_list,
     sort_list_to_raw_sort_list,
     sort_or_default,
@@ -420,7 +425,7 @@ def isnan(expr: Expr | str) -> Expr:
         >>> result.collect_column("isnan")[1].as_py()
         True
     """
-    return Expr(f.isnan(_to_raw_expr(expr)))
+    return Expr(f.isnan(coerce_to_column(expr)))
 
 
 def is_nan(expr: Expr | str) -> Expr:
@@ -440,7 +445,7 @@ def nullif(expr1: Expr | str, expr2: Expr | str) -> Expr:
         >>> result.collect_column("nullif").to_pylist()
         [None, 2]
     """
-    return Expr(f.nullif(_to_raw_expr(expr1), _to_raw_expr(expr2)))
+    return Expr(f.nullif(coerce_to_column(expr1), coerce_to_column(expr2)))
 
 
 def encode(expr: Expr | str, encoding: Expr | str) -> Expr:
@@ -455,7 +460,7 @@ def encode(expr: Expr | str, encoding: Expr | str) -> Expr:
     """
     _warn_if_expr_for_literal_arg(encoding, "encode", "encoding")
     encoding = coerce_to_expr(encoding)
-    return Expr(f.encode(_to_raw_expr(expr), encoding.expr))
+    return Expr(f.encode(coerce_to_column(expr), encoding.expr))
 
 
 def decode(expr: Expr | str, encoding: Expr | str) -> Expr:
@@ -470,7 +475,7 @@ def decode(expr: Expr | str, encoding: Expr | str) -> Expr:
     """
     _warn_if_expr_for_literal_arg(encoding, "decode", "encoding")
     encoding = coerce_to_expr(encoding)
-    return Expr(f.decode(_to_raw_expr(expr), encoding.expr))
+    return Expr(f.decode(coerce_to_column(expr), encoding.expr))
 
 
 def array_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
@@ -484,7 +489,9 @@ def array_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
         '1,2,3'
     """
     delimiter = coerce_to_expr(delimiter)
-    return Expr(f.array_to_string(_to_raw_expr(expr), delimiter.expr.cast(pa.string())))
+    return Expr(
+        f.array_to_string(coerce_to_column(expr), delimiter.expr.cast(pa.string()))
+    )
 
 
 def array_join(expr: Expr | str, delimiter: Expr | str) -> Expr:
@@ -562,7 +569,7 @@ def lambda_(params: list[str], body: Expr | str) -> Expr:
     See Also:
         :py:func:`lambda_var`, :py:func:`array_transform`, :py:func:`array_any_match`.
     """
-    return Expr(f.lambda_(params, _to_raw_expr(body)))
+    return Expr(f.lambda_(params, coerce_to_column(body)))
 
 
 def _to_lambda(fn: Expr | Callable[..., Any]) -> Expr:
@@ -615,7 +622,7 @@ def array_transform(array: Expr | str, transform: Expr | Callable[..., Any]) -> 
     See Also:
         :py:func:`array_any_match`, :py:func:`lambda_`.
     """
-    return Expr(f.array_transform(_to_raw_expr(array), _to_lambda(transform).expr))
+    return Expr(f.array_transform(coerce_to_column(array), _to_lambda(transform).expr))
 
 
 def list_transform(array: Expr | str, transform: Expr | Callable[..., Any]) -> Expr:
@@ -655,7 +662,7 @@ def array_any_match(array: Expr | str, predicate: Expr | Callable[..., Any]) -> 
     See Also:
         :py:func:`array_transform`, :py:func:`lambda_`.
     """
-    return Expr(f.array_any_match(_to_raw_expr(array), _to_lambda(predicate).expr))
+    return Expr(f.array_any_match(coerce_to_column(array), _to_lambda(predicate).expr))
 
 
 def any_match(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
@@ -705,7 +712,7 @@ def array_filter(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Exp
     See Also:
         :py:func:`array_transform`, :py:func:`array_any_match`, :py:func:`lambda_`.
     """
-    return Expr(f.array_filter(_to_raw_expr(array), _to_lambda(predicate).expr))
+    return Expr(f.array_filter(coerce_to_column(array), _to_lambda(predicate).expr))
 
 
 def list_filter(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
@@ -740,8 +747,8 @@ def in_list(arg: Expr | str, values: list[Expr], negated: bool = False) -> Expr:
         >>> result.collect_column("not_in").to_pylist()
         [False, True, False]
     """
-    values = [v.expr for v in values]
-    return Expr(f.in_list(_to_raw_expr(arg), values, negated))
+    values = [ensure_expr(v) for v in values]
+    return Expr(f.in_list(coerce_to_column(arg), values, negated))
 
 
 def digest(value: Expr | str, method: Expr | str) -> Expr:
@@ -759,7 +766,7 @@ def digest(value: Expr | str, method: Expr | str) -> Expr:
     """
     _warn_if_expr_for_literal_arg(method, "digest", "method")
     method = coerce_to_expr(method)
-    return Expr(f.digest(_to_raw_expr(value), method.expr))
+    return Expr(f.digest(coerce_to_column(value), method.expr))
 
 
 def contains(string: Expr | str, search_str: Expr | str) -> Expr:
@@ -773,7 +780,7 @@ def contains(string: Expr | str, search_str: Expr | str) -> Expr:
         True
     """
     search_str = coerce_to_expr(search_str)
-    return Expr(f.contains(_to_raw_expr(string), search_str.expr))
+    return Expr(f.contains(coerce_to_column(string), search_str.expr))
 
 
 def concat(*args: Expr | str) -> Expr:
@@ -788,7 +795,7 @@ def concat(*args: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py()
         'hello world'
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.concat(args))
 
 
@@ -804,7 +811,7 @@ def concat_ws(separator: str, *args: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py()
         'hello-world'
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.concat_ws(separator, args))
 
 
@@ -846,7 +853,7 @@ def alias(expr: Expr | str, name: str, metadata: dict[str, str] | None = None) -
           -- field metadata --
           info: 'test'
     """
-    return Expr(f.alias(_to_raw_expr(expr), name, metadata))
+    return Expr(f.alias(coerce_to_column(expr), name, metadata))
 
 
 def col(name: str) -> Expr:
@@ -907,7 +914,7 @@ def case(expr: Expr | str) -> CaseBuilder:
         >>> result.collect_column("c")[0].as_py()
         'one'
     """
-    return CaseBuilder(f.case(_to_raw_expr(expr)))
+    return CaseBuilder(f.case(coerce_to_column(expr)))
 
 
 def when(when: Expr | str, then: Expr) -> CaseBuilder:
@@ -926,7 +933,7 @@ def when(when: Expr | str, then: Expr) -> CaseBuilder:
         >>> result.collect_column("c")[2].as_py()
         'big'
     """
-    return CaseBuilder(f.when(_to_raw_expr(when), then.expr))
+    return CaseBuilder(f.when(coerce_to_column(when), ensure_expr(then)))
 
 
 # scalar functions
@@ -940,7 +947,7 @@ def abs(arg: Expr | str) -> Expr:
         >>> result.collect_column("abs")[0].as_py()
         1
     """
-    return Expr(f.abs(_to_raw_expr(arg)))
+    return Expr(f.abs(coerce_to_column(arg)))
 
 
 def acos(arg: Expr | str) -> Expr:
@@ -953,7 +960,7 @@ def acos(arg: Expr | str) -> Expr:
         >>> result.collect_column("acos")[0].as_py()
         0.0
     """
-    return Expr(f.acos(_to_raw_expr(arg)))
+    return Expr(f.acos(coerce_to_column(arg)))
 
 
 def acosh(arg: Expr | str) -> Expr:
@@ -966,7 +973,7 @@ def acosh(arg: Expr | str) -> Expr:
         >>> result.collect_column("acosh")[0].as_py()
         0.0
     """
-    return Expr(f.acosh(_to_raw_expr(arg)))
+    return Expr(f.acosh(coerce_to_column(arg)))
 
 
 def ascii(arg: Expr | str) -> Expr:
@@ -979,7 +986,7 @@ def ascii(arg: Expr | str) -> Expr:
         >>> ascii_df.collect_column("ascii")[0].as_py()
         97
     """
-    return Expr(f.ascii(_to_raw_expr(arg)))
+    return Expr(f.ascii(coerce_to_column(arg)))
 
 
 def asin(arg: Expr | str) -> Expr:
@@ -992,7 +999,7 @@ def asin(arg: Expr | str) -> Expr:
         >>> result.collect_column("asin")[0].as_py()
         0.0
     """
-    return Expr(f.asin(_to_raw_expr(arg)))
+    return Expr(f.asin(coerce_to_column(arg)))
 
 
 def asinh(arg: Expr | str) -> Expr:
@@ -1005,7 +1012,7 @@ def asinh(arg: Expr | str) -> Expr:
         >>> result.collect_column("asinh")[0].as_py()
         0.0
     """
-    return Expr(f.asinh(_to_raw_expr(arg)))
+    return Expr(f.asinh(coerce_to_column(arg)))
 
 
 def atan(arg: Expr | str) -> Expr:
@@ -1018,7 +1025,7 @@ def atan(arg: Expr | str) -> Expr:
         >>> result.collect_column("atan")[0].as_py()
         0.0
     """
-    return Expr(f.atan(_to_raw_expr(arg)))
+    return Expr(f.atan(coerce_to_column(arg)))
 
 
 def atanh(arg: Expr | str) -> Expr:
@@ -1031,7 +1038,7 @@ def atanh(arg: Expr | str) -> Expr:
         >>> result.collect_column("atanh")[0].as_py()
         0.0
     """
-    return Expr(f.atanh(_to_raw_expr(arg)))
+    return Expr(f.atanh(coerce_to_column(arg)))
 
 
 def atan2(y: Expr | str, x: Expr | str) -> Expr:
@@ -1044,7 +1051,7 @@ def atan2(y: Expr | str, x: Expr | str) -> Expr:
         >>> result.collect_column("atan2")[0].as_py()
         0.0
     """
-    return Expr(f.atan2(_to_raw_expr(y), _to_raw_expr(x)))
+    return Expr(f.atan2(coerce_to_column(y), coerce_to_column(x)))
 
 
 def bit_length(arg: Expr | str) -> Expr:
@@ -1057,7 +1064,7 @@ def bit_length(arg: Expr | str) -> Expr:
         >>> bit_df.collect_column("bit_len")[0].as_py()
         8
     """
-    return Expr(f.bit_length(_to_raw_expr(arg)))
+    return Expr(f.bit_length(coerce_to_column(arg)))
 
 
 def btrim(arg: Expr | str) -> Expr:
@@ -1070,7 +1077,7 @@ def btrim(arg: Expr | str) -> Expr:
         >>> trim_df.collect_column("trimmed")[0].as_py()
         'a'
     """
-    return Expr(f.btrim(_to_raw_expr(arg)))
+    return Expr(f.btrim(coerce_to_column(arg)))
 
 
 def cbrt(arg: Expr | str) -> Expr:
@@ -1083,7 +1090,7 @@ def cbrt(arg: Expr | str) -> Expr:
         >>> cbrt_df.collect_column("cbrt")[0].as_py()
         3.0
     """
-    return Expr(f.cbrt(_to_raw_expr(arg)))
+    return Expr(f.cbrt(coerce_to_column(arg)))
 
 
 def ceil(arg: Expr | str) -> Expr:
@@ -1096,7 +1103,7 @@ def ceil(arg: Expr | str) -> Expr:
         >>> ceil_df.collect_column("ceil")[0].as_py()
         2.0
     """
-    return Expr(f.ceil(_to_raw_expr(arg)))
+    return Expr(f.ceil(coerce_to_column(arg)))
 
 
 def character_length(arg: Expr | str) -> Expr:
@@ -1110,7 +1117,7 @@ def character_length(arg: Expr | str) -> Expr:
         >>> char_len_df.collect_column("char_len")[0].as_py()
         3
     """
-    return Expr(f.character_length(_to_raw_expr(arg)))
+    return Expr(f.character_length(coerce_to_column(arg)))
 
 
 def length(string: Expr | str) -> Expr:
@@ -1123,7 +1130,7 @@ def length(string: Expr | str) -> Expr:
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.length(_to_raw_expr(string)))
+    return Expr(f.length(coerce_to_column(string)))
 
 
 def char_length(string: Expr | str) -> Expr:
@@ -1136,7 +1143,7 @@ def char_length(string: Expr | str) -> Expr:
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.char_length(_to_raw_expr(string)))
+    return Expr(f.char_length(coerce_to_column(string)))
 
 
 def chr(arg: Expr | str) -> Expr:
@@ -1149,7 +1156,7 @@ def chr(arg: Expr | str) -> Expr:
         >>> result.collect_column("chr")[0].as_py()
         'A'
     """
-    return Expr(f.chr(_to_raw_expr(arg)))
+    return Expr(f.chr(coerce_to_column(arg)))
 
 
 def coalesce(*args: Expr | str) -> Expr:
@@ -1165,7 +1172,7 @@ def coalesce(*args: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py()
         2
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.coalesce(*args))
 
 
@@ -1179,7 +1186,7 @@ def cos(arg: Expr | str) -> Expr:
         >>> cos_df.collect_column("cos")[0].as_py()
         1.0
     """
-    return Expr(f.cos(_to_raw_expr(arg)))
+    return Expr(f.cos(coerce_to_column(arg)))
 
 
 def cosh(arg: Expr | str) -> Expr:
@@ -1192,7 +1199,7 @@ def cosh(arg: Expr | str) -> Expr:
         >>> cosh_df.collect_column("cosh")[0].as_py()
         1.0
     """
-    return Expr(f.cosh(_to_raw_expr(arg)))
+    return Expr(f.cosh(coerce_to_column(arg)))
 
 
 def cot(arg: Expr | str) -> Expr:
@@ -1206,7 +1213,7 @@ def cot(arg: Expr | str) -> Expr:
         >>> result.collect_column("cot")[0].as_py()
         1.0...
     """
-    return Expr(f.cot(_to_raw_expr(arg)))
+    return Expr(f.cot(coerce_to_column(arg)))
 
 
 def degrees(arg: Expr | str) -> Expr:
@@ -1220,7 +1227,7 @@ def degrees(arg: Expr | str) -> Expr:
         >>> deg_df.collect_column("deg")[2].as_py()
         360.0
     """
-    return Expr(f.degrees(_to_raw_expr(arg)))
+    return Expr(f.degrees(coerce_to_column(arg)))
 
 
 def ends_with(arg: Expr | str, suffix: Expr | str) -> Expr:
@@ -1235,7 +1242,7 @@ def ends_with(arg: Expr | str, suffix: Expr | str) -> Expr:
         True
     """
     suffix = coerce_to_expr(suffix)
-    return Expr(f.ends_with(_to_raw_expr(arg), suffix.expr))
+    return Expr(f.ends_with(coerce_to_column(arg), suffix.expr))
 
 
 def exp(arg: Expr | str) -> Expr:
@@ -1248,7 +1255,7 @@ def exp(arg: Expr | str) -> Expr:
         >>> result.collect_column("exp")[0].as_py()
         1.0
     """
-    return Expr(f.exp(_to_raw_expr(arg)))
+    return Expr(f.exp(coerce_to_column(arg)))
 
 
 def factorial(arg: Expr | str) -> Expr:
@@ -1261,7 +1268,7 @@ def factorial(arg: Expr | str) -> Expr:
         >>> result.collect_column("factorial")[0].as_py()
         6
     """
-    return Expr(f.factorial(_to_raw_expr(arg)))
+    return Expr(f.factorial(coerce_to_column(arg)))
 
 
 def find_in_set(string: Expr | str, string_list: Expr | str) -> Expr:
@@ -1280,7 +1287,7 @@ def find_in_set(string: Expr | str, string_list: Expr | str) -> Expr:
         2
     """
     string_list = coerce_to_expr(string_list)
-    return Expr(f.find_in_set(_to_raw_expr(string), string_list.expr))
+    return Expr(f.find_in_set(coerce_to_column(string), string_list.expr))
 
 
 def floor(arg: Expr | str) -> Expr:
@@ -1293,7 +1300,7 @@ def floor(arg: Expr | str) -> Expr:
         >>> floor_df.collect_column("floor")[0].as_py()
         1.0
     """
-    return Expr(f.floor(_to_raw_expr(arg)))
+    return Expr(f.floor(coerce_to_column(arg)))
 
 
 def gcd(x: Expr | str, y: Expr | str) -> Expr:
@@ -1306,7 +1313,7 @@ def gcd(x: Expr | str, y: Expr | str) -> Expr:
         >>> result.collect_column("gcd")[0].as_py()
         4
     """
-    return Expr(f.gcd(_to_raw_expr(x), _to_raw_expr(y)))
+    return Expr(f.gcd(coerce_to_column(x), coerce_to_column(y)))
 
 
 def greatest(*args: Expr | str) -> Expr:
@@ -1323,7 +1330,7 @@ def greatest(*args: Expr | str) -> Expr:
         >>> result.collect_column("greatest")[1].as_py()
         3
     """
-    exprs = _to_raw_expr_list(args)
+    exprs = coerce_to_column_list(args)
     return Expr(f.greatest(*exprs))
 
 
@@ -1353,7 +1360,7 @@ def initcap(string: Expr | str) -> Expr:
         >>> cap_df.collect_column("cap")[0].as_py()
         'The Cat'
     """
-    return Expr(f.initcap(_to_raw_expr(string)))
+    return Expr(f.initcap(coerce_to_column(string)))
 
 
 def instr(string: Expr | str, substring: Expr | str) -> Expr:
@@ -1375,7 +1382,7 @@ def iszero(arg: Expr | str) -> Expr:
         >>> result.collect_column("iz")[0].as_py()
         True
     """
-    return Expr(f.iszero(_to_raw_expr(arg)))
+    return Expr(f.iszero(coerce_to_column(arg)))
 
 
 def lcm(x: Expr | str, y: Expr | str) -> Expr:
@@ -1388,7 +1395,7 @@ def lcm(x: Expr | str, y: Expr | str) -> Expr:
         >>> result.collect_column("lcm")[0].as_py()
         12
     """
-    return Expr(f.lcm(_to_raw_expr(x), _to_raw_expr(y)))
+    return Expr(f.lcm(coerce_to_column(x), coerce_to_column(y)))
 
 
 def least(*args: Expr | str) -> Expr:
@@ -1405,7 +1412,7 @@ def least(*args: Expr | str) -> Expr:
         >>> result.collect_column("least")[1].as_py()
         1
     """
-    exprs = _to_raw_expr_list(args)
+    exprs = coerce_to_column_list(args)
     return Expr(f.least(*exprs))
 
 
@@ -1420,7 +1427,7 @@ def left(string: Expr | str, n: Expr | int) -> Expr:
         'the'
     """
     n = coerce_to_expr(n)
-    return Expr(f.left(_to_raw_expr(string), n.expr))
+    return Expr(f.left(coerce_to_column(string), n.expr))
 
 
 def levenshtein(string1: Expr | str, string2: Expr | str) -> Expr:
@@ -1434,7 +1441,7 @@ def levenshtein(string1: Expr | str, string2: Expr | str) -> Expr:
         3
     """
     string2 = coerce_to_expr(string2)
-    return Expr(f.levenshtein(_to_raw_expr(string1), string2.expr))
+    return Expr(f.levenshtein(coerce_to_column(string1), string2.expr))
 
 
 def ln(arg: Expr | str) -> Expr:
@@ -1447,7 +1454,7 @@ def ln(arg: Expr | str) -> Expr:
         >>> result.collect_column("ln")[0].as_py()
         0.0
     """
-    return Expr(f.ln(_to_raw_expr(arg)))
+    return Expr(f.ln(coerce_to_column(arg)))
 
 
 def log(base: Expr | int | float, num: Expr | str) -> Expr:  # noqa: PYI041
@@ -1461,7 +1468,7 @@ def log(base: Expr | int | float, num: Expr | str) -> Expr:  # noqa: PYI041
         2.0
     """
     base = coerce_to_expr(base)
-    return Expr(f.log(base.expr, _to_raw_expr(num)))
+    return Expr(f.log(base.expr, coerce_to_column(num)))
 
 
 def log10(arg: Expr | str) -> Expr:
@@ -1474,7 +1481,7 @@ def log10(arg: Expr | str) -> Expr:
         >>> result.collect_column("log10")[0].as_py()
         2.0
     """
-    return Expr(f.log10(_to_raw_expr(arg)))
+    return Expr(f.log10(coerce_to_column(arg)))
 
 
 def log2(arg: Expr | str) -> Expr:
@@ -1487,7 +1494,7 @@ def log2(arg: Expr | str) -> Expr:
         >>> result.collect_column("log2")[0].as_py()
         3.0
     """
-    return Expr(f.log2(_to_raw_expr(arg)))
+    return Expr(f.log2(coerce_to_column(arg)))
 
 
 def lower(arg: Expr | str) -> Expr:
@@ -1500,7 +1507,7 @@ def lower(arg: Expr | str) -> Expr:
         >>> lower_df.collect_column("lower")[0].as_py()
         'the cat'
     """
-    return Expr(f.lower(_to_raw_expr(arg)))
+    return Expr(f.lower(coerce_to_column(arg)))
 
 
 def lpad(
@@ -1530,7 +1537,7 @@ def lpad(
     """
     count = coerce_to_expr(count)
     characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.lpad(_to_raw_expr(string), count.expr, characters.expr))
+    return Expr(f.lpad(coerce_to_column(string), count.expr, characters.expr))
 
 
 def ltrim(arg: Expr | str) -> Expr:
@@ -1543,7 +1550,7 @@ def ltrim(arg: Expr | str) -> Expr:
         >>> trim_df.collect_column("trimmed")[0].as_py()
         'a  '
     """
-    return Expr(f.ltrim(_to_raw_expr(arg)))
+    return Expr(f.ltrim(coerce_to_column(arg)))
 
 
 def md5(arg: Expr | str) -> Expr:
@@ -1556,7 +1563,7 @@ def md5(arg: Expr | str) -> Expr:
         >>> result.collect_column("md5")[0].as_py()
         '5d41402abc4b2a76b9719d911017c592'
     """
-    return Expr(f.md5(_to_raw_expr(arg)))
+    return Expr(f.md5(coerce_to_column(arg)))
 
 
 def nanvl(x: Expr | str, y: Expr | str) -> Expr:
@@ -1575,7 +1582,7 @@ def nanvl(x: Expr | str, y: Expr | str) -> Expr:
         >>> nanvl_df.collect_column("nanvl")[1].as_py()
         1.0
     """
-    return Expr(f.nanvl(_to_raw_expr(x), _to_raw_expr(y)))
+    return Expr(f.nanvl(coerce_to_column(x), coerce_to_column(y)))
 
 
 def nvl(x: Expr | str, y: Expr | str) -> Expr:
@@ -1594,7 +1601,7 @@ def nvl(x: Expr | str, y: Expr | str) -> Expr:
         >>> nvl_df.collect_column("nvl")[1].as_py()
         1
     """
-    return Expr(f.nvl(_to_raw_expr(x), _to_raw_expr(y)))
+    return Expr(f.nvl(coerce_to_column(x), coerce_to_column(y)))
 
 
 def nvl2(x: Expr | str, y: Expr | str, z: Expr | str) -> Expr:
@@ -1614,7 +1621,7 @@ def nvl2(x: Expr | str, y: Expr | str, z: Expr | str) -> Expr:
         >>> result.collect_column("nvl2")[1].as_py()
         20
     """
-    return Expr(f.nvl2(_to_raw_expr(x), _to_raw_expr(y), _to_raw_expr(z)))
+    return Expr(f.nvl2(coerce_to_column(x), coerce_to_column(y), coerce_to_column(z)))
 
 
 def octet_length(arg: Expr | str) -> Expr:
@@ -1627,7 +1634,7 @@ def octet_length(arg: Expr | str) -> Expr:
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.octet_length(_to_raw_expr(arg)))
+    return Expr(f.octet_length(coerce_to_column(arg)))
 
 
 def overlay(
@@ -1651,10 +1658,10 @@ def overlay(
     substring = coerce_to_expr(substring)
     start = coerce_to_expr(start)
     if length is None:
-        return Expr(f.overlay(_to_raw_expr(string), substring.expr, start.expr))
+        return Expr(f.overlay(coerce_to_column(string), substring.expr, start.expr))
     length = coerce_to_expr(length)
     return Expr(
-        f.overlay(_to_raw_expr(string), substring.expr, start.expr, length.expr)
+        f.overlay(coerce_to_column(string), substring.expr, start.expr, length.expr)
     )
 
 
@@ -1694,7 +1701,7 @@ def power(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI0
         8.0
     """
     exponent = coerce_to_expr(exponent)
-    return Expr(f.power(_to_raw_expr(base), exponent.expr))
+    return Expr(f.power(coerce_to_column(base), exponent.expr))
 
 
 def pow(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
@@ -1717,7 +1724,7 @@ def radians(arg: Expr | str) -> Expr:
         >>> result.collect_column("rad")[0].as_py() == pi
         True
     """
-    return Expr(f.radians(_to_raw_expr(arg)))
+    return Expr(f.radians(coerce_to_column(arg)))
 
 
 def regexp_like(
@@ -1751,7 +1758,9 @@ def regexp_like(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_like(
-            _to_raw_expr(string), regex.expr, flags.expr if flags is not None else None
+            coerce_to_column(string),
+            regex.expr,
+            flags.expr if flags is not None else None,
         )
     )
 
@@ -1787,7 +1796,9 @@ def regexp_match(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_match(
-            _to_raw_expr(string), regex.expr, flags.expr if flags is not None else None
+            coerce_to_column(string),
+            regex.expr,
+            flags.expr if flags is not None else None,
         )
     )
 
@@ -1833,7 +1844,7 @@ def regexp_replace(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_replace(
-            _to_raw_expr(string),
+            coerce_to_column(string),
             pattern.expr,
             replacement.expr,
             flags.expr if flags is not None else None,
@@ -1874,7 +1885,7 @@ def regexp_count(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_count(
-            _to_raw_expr(string),
+            coerce_to_column(string),
             pattern.expr,
             start.expr if start is not None else None,
             flags.expr if flags is not None else None,
@@ -1940,7 +1951,7 @@ def regexp_instr(
 
     return Expr(
         f.regexp_instr(
-            _to_raw_expr(values),
+            coerce_to_column(values),
             regex.expr,
             start.expr if start is not None else None,
             n.expr if n is not None else None,
@@ -1961,7 +1972,7 @@ def repeat(string: Expr | str, n: Expr | int) -> Expr:
         'hahaha'
     """
     n = coerce_to_expr(n)
-    return Expr(f.repeat(_to_raw_expr(string), n.expr))
+    return Expr(f.repeat(coerce_to_column(string), n.expr))
 
 
 def replace(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Expr:
@@ -1976,7 +1987,7 @@ def replace(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Exp
     """
     from_val = coerce_to_expr(from_val)
     to_val = coerce_to_expr(to_val)
-    return Expr(f.replace(_to_raw_expr(string), from_val.expr, to_val.expr))
+    return Expr(f.replace(coerce_to_column(string), from_val.expr, to_val.expr))
 
 
 def reverse(arg: Expr | str) -> Expr:
@@ -1989,7 +2000,7 @@ def reverse(arg: Expr | str) -> Expr:
         >>> result.collect_column("r")[0].as_py()
         'olleh'
     """
-    return Expr(f.reverse(_to_raw_expr(arg)))
+    return Expr(f.reverse(coerce_to_column(arg)))
 
 
 def right(string: Expr | str, n: Expr | int) -> Expr:
@@ -2003,7 +2014,7 @@ def right(string: Expr | str, n: Expr | int) -> Expr:
         'llo'
     """
     n = coerce_to_expr(n)
-    return Expr(f.right(_to_raw_expr(string), n.expr))
+    return Expr(f.right(coerce_to_column(string), n.expr))
 
 
 def round(value: Expr | str, decimal_places: Expr | int | None = None) -> Expr:
@@ -2021,7 +2032,7 @@ def round(value: Expr | str, decimal_places: Expr | int | None = None) -> Expr:
         1.57
     """
     decimal_places = coerce_to_expr(decimal_places if decimal_places is not None else 0)
-    return Expr(f.round(_to_raw_expr(value), decimal_places.expr))
+    return Expr(f.round(coerce_to_column(value), decimal_places.expr))
 
 
 def rpad(
@@ -2041,7 +2052,7 @@ def rpad(
     """
     count = coerce_to_expr(count)
     characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.rpad(_to_raw_expr(string), count.expr, characters.expr))
+    return Expr(f.rpad(coerce_to_column(string), count.expr, characters.expr))
 
 
 def rtrim(arg: Expr | str) -> Expr:
@@ -2054,7 +2065,7 @@ def rtrim(arg: Expr | str) -> Expr:
         >>> trim_df.collect_column("trimmed")[0].as_py()
         ' a'
     """
-    return Expr(f.rtrim(_to_raw_expr(arg)))
+    return Expr(f.rtrim(coerce_to_column(arg)))
 
 
 def sha224(arg: Expr | str) -> Expr:
@@ -2067,7 +2078,7 @@ def sha224(arg: Expr | str) -> Expr:
         >>> result.collect_column("h")[0].as_py().hex()
         'ea09ae9cc6768c50fcee903ed054556e5bfc8347907f12598aa24193'
     """
-    return Expr(f.sha224(_to_raw_expr(arg)))
+    return Expr(f.sha224(coerce_to_column(arg)))
 
 
 def sha256(arg: Expr | str) -> Expr:
@@ -2080,7 +2091,7 @@ def sha256(arg: Expr | str) -> Expr:
         >>> result.collect_column("h")[0].as_py().hex()
         '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
     """
-    return Expr(f.sha256(_to_raw_expr(arg)))
+    return Expr(f.sha256(coerce_to_column(arg)))
 
 
 def sha384(arg: Expr | str) -> Expr:
@@ -2093,7 +2104,7 @@ def sha384(arg: Expr | str) -> Expr:
         >>> result.collect_column("h")[0].as_py().hex()
         '59e1748777448c69de6b800d7a33bbfb9ff1b...
     """
-    return Expr(f.sha384(_to_raw_expr(arg)))
+    return Expr(f.sha384(coerce_to_column(arg)))
 
 
 def sha512(arg: Expr | str) -> Expr:
@@ -2106,7 +2117,7 @@ def sha512(arg: Expr | str) -> Expr:
         >>> result.collect_column("h")[0].as_py().hex()
         '9b71d224bd62f3785d96d46ad3ea3d73319bfb...
     """
-    return Expr(f.sha512(_to_raw_expr(arg)))
+    return Expr(f.sha512(coerce_to_column(arg)))
 
 
 def signum(arg: Expr | str) -> Expr:
@@ -2119,7 +2130,7 @@ def signum(arg: Expr | str) -> Expr:
         >>> result.collect_column("s").to_pylist()
         [-1.0, 0.0, 1.0]
     """
-    return Expr(f.signum(_to_raw_expr(arg)))
+    return Expr(f.signum(coerce_to_column(arg)))
 
 
 def sin(arg: Expr | str) -> Expr:
@@ -2132,7 +2143,7 @@ def sin(arg: Expr | str) -> Expr:
         >>> result.collect_column("sin")[0].as_py()
         0.0
     """
-    return Expr(f.sin(_to_raw_expr(arg)))
+    return Expr(f.sin(coerce_to_column(arg)))
 
 
 def sinh(arg: Expr | str) -> Expr:
@@ -2145,7 +2156,7 @@ def sinh(arg: Expr | str) -> Expr:
         >>> result.collect_column("sinh")[0].as_py()
         0.0
     """
-    return Expr(f.sinh(_to_raw_expr(arg)))
+    return Expr(f.sinh(coerce_to_column(arg)))
 
 
 def split_part(string: Expr | str, delimiter: Expr | str, index: Expr | int) -> Expr:
@@ -2163,7 +2174,7 @@ def split_part(string: Expr | str, delimiter: Expr | str, index: Expr | int) -> 
     """
     delimiter = coerce_to_expr(delimiter)
     index = coerce_to_expr(index)
-    return Expr(f.split_part(_to_raw_expr(string), delimiter.expr, index.expr))
+    return Expr(f.split_part(coerce_to_column(string), delimiter.expr, index.expr))
 
 
 def sqrt(arg: Expr | str) -> Expr:
@@ -2176,7 +2187,7 @@ def sqrt(arg: Expr | str) -> Expr:
         >>> result.collect_column("sqrt")[0].as_py()
         3.0
     """
-    return Expr(f.sqrt(_to_raw_expr(arg)))
+    return Expr(f.sqrt(coerce_to_column(arg)))
 
 
 def starts_with(string: Expr | str, prefix: Expr | str) -> Expr:
@@ -2190,7 +2201,7 @@ def starts_with(string: Expr | str, prefix: Expr | str) -> Expr:
         True
     """
     prefix = coerce_to_expr(prefix)
-    return Expr(f.starts_with(_to_raw_expr(string), prefix.expr))
+    return Expr(f.starts_with(coerce_to_column(string), prefix.expr))
 
 
 def strpos(string: Expr | str, substring: Expr | str) -> Expr:
@@ -2204,7 +2215,7 @@ def strpos(string: Expr | str, substring: Expr | str) -> Expr:
         3
     """
     substring = coerce_to_expr(substring)
-    return Expr(f.strpos(_to_raw_expr(string), substring.expr))
+    return Expr(f.strpos(coerce_to_column(string), substring.expr))
 
 
 def substr(string: Expr | str, position: Expr | int) -> Expr:
@@ -2218,7 +2229,7 @@ def substr(string: Expr | str, position: Expr | int) -> Expr:
         'llo'
     """
     position = coerce_to_expr(position)
-    return Expr(f.substr(_to_raw_expr(string), position.expr))
+    return Expr(f.substr(coerce_to_column(string), position.expr))
 
 
 def substr_index(string: Expr | str, delimiter: Expr | str, count: Expr | int) -> Expr:
@@ -2236,7 +2247,7 @@ def substr_index(string: Expr | str, delimiter: Expr | str, count: Expr | int) -
     """
     delimiter = coerce_to_expr(delimiter)
     count = coerce_to_expr(count)
-    return Expr(f.substr_index(_to_raw_expr(string), delimiter.expr, count.expr))
+    return Expr(f.substr_index(coerce_to_column(string), delimiter.expr, count.expr))
 
 
 def substring(string: Expr | str, position: Expr | int, length: Expr | int) -> Expr:
@@ -2251,7 +2262,7 @@ def substring(string: Expr | str, position: Expr | int, length: Expr | int) -> E
     """
     position = coerce_to_expr(position)
     length = coerce_to_expr(length)
-    return Expr(f.substring(_to_raw_expr(string), position.expr, length.expr))
+    return Expr(f.substring(coerce_to_column(string), position.expr, length.expr))
 
 
 def tan(arg: Expr | str) -> Expr:
@@ -2264,7 +2275,7 @@ def tan(arg: Expr | str) -> Expr:
         >>> result.collect_column("tan")[0].as_py()
         0.0
     """
-    return Expr(f.tan(_to_raw_expr(arg)))
+    return Expr(f.tan(coerce_to_column(arg)))
 
 
 def tanh(arg: Expr | str) -> Expr:
@@ -2277,7 +2288,7 @@ def tanh(arg: Expr | str) -> Expr:
         >>> result.collect_column("tanh")[0].as_py()
         0.0
     """
-    return Expr(f.tanh(_to_raw_expr(arg)))
+    return Expr(f.tanh(coerce_to_column(arg)))
 
 
 def to_hex(arg: Expr | str) -> Expr:
@@ -2290,7 +2301,7 @@ def to_hex(arg: Expr | str) -> Expr:
         >>> result.collect_column("hex")[0].as_py()
         'ff'
     """
-    return Expr(f.to_hex(_to_raw_expr(arg)))
+    return Expr(f.to_hex(coerce_to_column(arg)))
 
 
 def now() -> Expr:
@@ -2343,7 +2354,7 @@ def to_char(arg: Expr | str, formatter: Expr | str) -> Expr:
         '2021/01/01'
     """
     formatter = coerce_to_expr(formatter)
-    return Expr(f.to_char(_to_raw_expr(arg), formatter.expr))
+    return Expr(f.to_char(coerce_to_column(arg), formatter.expr))
 
 
 def date_format(arg: Expr | str, formatter: Expr | str) -> Expr:
@@ -2353,6 +2364,11 @@ def date_format(arg: Expr | str, formatter: Expr | str) -> Expr:
         This is an alias for :py:func:`to_char`.
     """
     return to_char(arg, formatter)
+
+
+def _raw_literals(values: Iterable[Expr | str | Any]) -> list:
+    """Coerce each value to a literal ``Expr`` and unwrap it to its raw variant."""
+    return [value.expr for value in coerce_to_expr_list(values)]
 
 
 def to_date(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2381,11 +2397,7 @@ def to_date(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("dt")[0].as_py())
         '2021-07-20'
     """
-    return Expr(
-        f.to_date(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
-    )
+    return Expr(f.to_date(coerce_to_column(arg), *_raw_literals(formatters)))
 
 
 def to_local_time(*args: Expr | str) -> Expr:
@@ -2393,7 +2405,7 @@ def to_local_time(*args: Expr | str) -> Expr:
 
     This function handles daylight saving time changes.
     """
-    return Expr(f.to_local_time(*_to_raw_expr_list(args)))
+    return Expr(f.to_local_time(*coerce_to_column_list(args)))
 
 
 def to_time(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2420,11 +2432,7 @@ def to_time(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("t")[0].as_py())
         '14:30:00'
     """
-    return Expr(
-        f.to_time(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
-    )
+    return Expr(f.to_time(coerce_to_column(arg), *_raw_literals(formatters)))
 
 
 def to_timestamp(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2452,11 +2460,7 @@ def to_timestamp(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
-    return Expr(
-        f.to_timestamp(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
-    )
+    return Expr(f.to_timestamp(coerce_to_column(arg), *_raw_literals(formatters)))
 
 
 def to_timestamp_millis(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2483,9 +2487,7 @@ def to_timestamp_millis(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_millis(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
+        f.to_timestamp_millis(coerce_to_column(arg), *_raw_literals(formatters))
     )
 
 
@@ -2513,9 +2515,7 @@ def to_timestamp_micros(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_micros(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
+        f.to_timestamp_micros(coerce_to_column(arg), *_raw_literals(formatters))
     )
 
 
@@ -2542,11 +2542,7 @@ def to_timestamp_nanos(arg: Expr | str, *formatters: Expr | str) -> Expr:
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
-    return Expr(
-        f.to_timestamp_nanos(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
-    )
+    return Expr(f.to_timestamp_nanos(coerce_to_column(arg), *_raw_literals(formatters)))
 
 
 def to_timestamp_seconds(arg: Expr | str, *formatters: Expr | str) -> Expr:
@@ -2573,9 +2569,7 @@ def to_timestamp_seconds(arg: Expr | str, *formatters: Expr | str) -> Expr:
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_seconds(
-            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
-        )
+        f.to_timestamp_seconds(coerce_to_column(arg), *_raw_literals(formatters))
     )
 
 
@@ -2602,8 +2596,8 @@ def to_unixtime(string: Expr | str, *format_arguments: Expr | str) -> Expr:
     """
     return Expr(
         f.to_unixtime(
-            _to_raw_expr(string),
-            *_to_raw_expr_list(coerce_to_expr_list(format_arguments)),
+            coerce_to_column(string),
+            *_raw_literals(format_arguments),
         )
     )
 
@@ -2676,7 +2670,7 @@ def date_part(part: Expr | str, date: Expr | str) -> Expr:
 def _date_part(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
     part = coerce_to_expr(part)
-    return Expr(f.date_part(part.expr, _to_raw_expr(date)))
+    return Expr(f.date_part(part.expr, coerce_to_column(date)))
 
 
 def extract(part: Expr | str, date: Expr | str) -> Expr:
@@ -2710,7 +2704,7 @@ def date_trunc(part: Expr | str, date: Expr | str) -> Expr:
 def _date_trunc(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
     part = coerce_to_expr(part)
-    return Expr(f.date_trunc(part.expr, _to_raw_expr(date)))
+    return Expr(f.date_trunc(part.expr, coerce_to_column(date)))
 
 
 def datetrunc(part: Expr | str, date: Expr | str) -> Expr:
@@ -2823,7 +2817,7 @@ def translate(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> E
     """
     from_val = coerce_to_expr(from_val)
     to_val = coerce_to_expr(to_val)
-    return Expr(f.translate(_to_raw_expr(string), from_val.expr, to_val.expr))
+    return Expr(f.translate(coerce_to_column(string), from_val.expr, to_val.expr))
 
 
 def trim(arg: Expr | str) -> Expr:
@@ -2836,7 +2830,7 @@ def trim(arg: Expr | str) -> Expr:
         >>> result.collect_column("t")[0].as_py()
         'hello'
     """
-    return Expr(f.trim(_to_raw_expr(arg)))
+    return Expr(f.trim(coerce_to_column(arg)))
 
 
 def trunc(num: Expr | str, precision: Expr | int | None = None) -> Expr:
@@ -2855,8 +2849,8 @@ def trunc(num: Expr | str, precision: Expr | int | None = None) -> Expr:
     """
     if precision is not None:
         precision = coerce_to_expr(precision)
-        return Expr(f.trunc(_to_raw_expr(num), precision.expr))
-    return Expr(f.trunc(_to_raw_expr(num)))
+        return Expr(f.trunc(coerce_to_column(num), precision.expr))
+    return Expr(f.trunc(coerce_to_column(num)))
 
 
 def upper(arg: Expr | str) -> Expr:
@@ -2869,7 +2863,7 @@ def upper(arg: Expr | str) -> Expr:
         >>> result.collect_column("u")[0].as_py()
         'HELLO'
     """
-    return Expr(f.upper(_to_raw_expr(arg)))
+    return Expr(f.upper(coerce_to_column(arg)))
 
 
 def make_array(*args: Expr | str) -> Expr:
@@ -2885,7 +2879,7 @@ def make_array(*args: Expr | str) -> Expr:
         >>> result.collect_column("arr")[0].as_py()
         [1, 2, 3]
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.make_array(args))
 
 
@@ -2918,7 +2912,7 @@ def range(start: Expr, stop: Expr, step: Expr) -> Expr:
         >>> result.collect_column("r")[0].as_py()
         [0, 2, 4]
     """
-    return Expr(f.range(start.expr, stop.expr, step.expr))
+    return Expr(f.range(ensure_expr(start), ensure_expr(stop), ensure_expr(step)))
 
 
 def uuid() -> Expr:
@@ -2950,7 +2944,7 @@ def struct(*args: Expr | str) -> Expr:
         >>> result.collect_column("s")[0].as_py() == {"c0": 1, "c1": 2}
         True
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.struct(*args))
 
 
@@ -2973,7 +2967,7 @@ def named_struct(name_pairs: list[tuple[str, Expr | str]]) -> Expr:
         for name, value in name_pairs
         for raw in (
             Expr.literal(pa.scalar(name, type=pa.string())).expr,
-            _to_raw_expr(value),
+            coerce_to_column(value),
         )
     ]
     return Expr(f.named_struct(*raw_pairs))
@@ -2989,7 +2983,7 @@ def from_unixtime(arg: Expr | str) -> Expr:
         >>> str(result.collect_column("ts")[0].as_py())
         '1970-01-01 00:00:00'
     """
-    return Expr(f.from_unixtime(_to_raw_expr(arg)))
+    return Expr(f.from_unixtime(coerce_to_column(arg)))
 
 
 def arrow_typeof(arg: Expr | str) -> Expr:
@@ -3002,7 +2996,7 @@ def arrow_typeof(arg: Expr | str) -> Expr:
         >>> result.collect_column("t")[0].as_py()
         'Int64'
     """
-    return Expr(f.arrow_typeof(_to_raw_expr(arg)))
+    return Expr(f.arrow_typeof(coerce_to_column(arg)))
 
 
 def arrow_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Expr:
@@ -3033,10 +3027,10 @@ def arrow_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Expr:
     """
     _warn_if_expr_for_literal_arg(data_type, "arrow_cast", "data_type")
     if isinstance(data_type, pa.DataType):
-        return Expr(_to_raw_expr(expr)).cast(data_type)
+        return Expr(coerce_to_column(expr)).cast(data_type)
     if isinstance(data_type, str):
         data_type = Expr.string_literal(data_type)
-    return Expr(f.arrow_cast(_to_raw_expr(expr), data_type.expr))
+    return Expr(f.arrow_cast(coerce_to_column(expr), data_type.expr))
 
 
 def arrow_try_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Expr:
@@ -3064,10 +3058,10 @@ def arrow_try_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Exp
     """
     _warn_if_expr_for_literal_arg(data_type, "arrow_try_cast", "data_type")
     if isinstance(data_type, pa.DataType):
-        return Expr(_to_raw_expr(expr)).try_cast(data_type)
+        return Expr(coerce_to_column(expr)).try_cast(data_type)
     if isinstance(data_type, str):
         data_type = Expr.string_literal(data_type)
-    return Expr(f.arrow_try_cast(_to_raw_expr(expr), data_type.expr))
+    return Expr(f.arrow_try_cast(coerce_to_column(expr), data_type.expr))
 
 
 def arrow_field(expr: Expr | str) -> Expr:
@@ -3087,7 +3081,7 @@ def arrow_field(expr: Expr | str) -> Expr:
         >>> out["name"], out["data_type"], out["nullable"], out["metadata"]
         ('val', 'Int64', True, [('k', 'v')])
     """
-    return Expr(f.arrow_field(_to_raw_expr(expr)))
+    return Expr(f.arrow_field(coerce_to_column(expr)))
 
 
 def cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
@@ -3109,7 +3103,7 @@ def cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py()
         1.0
     """
-    return Expr(f.cast_to_type(_to_raw_expr(value), _to_raw_expr(type_ref)))
+    return Expr(f.cast_to_type(coerce_to_column(value), coerce_to_column(type_ref)))
 
 
 def try_cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
@@ -3129,7 +3123,7 @@ def try_cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
         >>> result.collect_column("c")[0].as_py() is None
         True
     """
-    return Expr(f.try_cast_to_type(_to_raw_expr(value), _to_raw_expr(type_ref)))
+    return Expr(f.try_cast_to_type(coerce_to_column(value), coerce_to_column(type_ref)))
 
 
 def arrow_metadata(expr: Expr | str, key: Expr | str | None = None) -> Expr:
@@ -3157,11 +3151,11 @@ def arrow_metadata(expr: Expr | str, key: Expr | str | None = None) -> Expr:
         'v'
     """
     if key is None:
-        return Expr(f.arrow_metadata(_to_raw_expr(expr)))
+        return Expr(f.arrow_metadata(coerce_to_column(expr)))
     _warn_if_expr_for_literal_arg(key, "arrow_metadata", "key")
     if isinstance(key, str):
         key = Expr.string_literal(key)
-    return Expr(f.arrow_metadata(_to_raw_expr(expr), key.expr))
+    return Expr(f.arrow_metadata(coerce_to_column(expr), key.expr))
 
 
 def with_metadata(expr: Expr | str, metadata: dict[str, str]) -> Expr:
@@ -3189,7 +3183,7 @@ def with_metadata(expr: Expr | str, metadata: dict[str, str]) -> Expr:
     """
     if not metadata:
         return expr
-    args = [_to_raw_expr(expr)]
+    args = [coerce_to_column(expr)]
     for k, v in metadata.items():
         if not k:
             msg = "with_metadata keys must be non-empty strings"
@@ -3249,7 +3243,7 @@ def get_field(expr: Expr | str, *names: Expr | str) -> Expr:
         msg = "get_field requires at least one field name"
         raise ValueError(msg)
     resolved = [Expr.string_literal(n) if isinstance(n, str) else n for n in names]
-    return Expr(f.get_field(_to_raw_expr(expr), [n.expr for n in resolved]))
+    return Expr(f.get_field(coerce_to_column(expr), [n.expr for n in resolved]))
 
 
 def union_extract(union_expr: Expr | str, field_name: Expr | str) -> Expr:
@@ -3274,7 +3268,7 @@ def union_extract(union_expr: Expr | str, field_name: Expr | str) -> Expr:
     """
     if isinstance(field_name, str):
         field_name = Expr.string_literal(field_name)
-    return Expr(f.union_extract(_to_raw_expr(union_expr), field_name.expr))
+    return Expr(f.union_extract(coerce_to_column(union_expr), field_name.expr))
 
 
 def union_tag(union_expr: Expr | str) -> Expr:
@@ -3294,7 +3288,7 @@ def union_tag(union_expr: Expr | str) -> Expr:
         >>> result.collect_column("tag").to_pylist()
         ['int', 'str', 'int']
     """
-    return Expr(f.union_tag(_to_raw_expr(union_expr)))
+    return Expr(f.union_tag(coerce_to_column(union_expr)))
 
 
 def version() -> Expr:
@@ -3346,7 +3340,7 @@ def array_append(array: Expr | str, element: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    return Expr(f.array_append(_to_raw_expr(array), element.expr))
+    return Expr(f.array_append(coerce_to_column(array), ensure_expr(element)))
 
 
 def array_push_back(array: Expr | str, element: Expr) -> Expr:
@@ -3386,7 +3380,7 @@ def array_concat(*args: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    args = _to_raw_expr_list(args)
+    args = coerce_to_column_list(args)
     return Expr(f.array_concat(args))
 
 
@@ -3409,7 +3403,7 @@ def array_dims(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [3]
     """
-    return Expr(f.array_dims(_to_raw_expr(array)))
+    return Expr(f.array_dims(coerce_to_column(array)))
 
 
 def array_distinct(array: Expr | str) -> Expr:
@@ -3424,7 +3418,7 @@ def array_distinct(array: Expr | str) -> Expr:
         ... )
         [1, 2, 3]
     """
-    return Expr(f.array_distinct(_to_raw_expr(array)))
+    return Expr(f.array_distinct(coerce_to_column(array)))
 
 
 def array_compact(array: Expr | str) -> Expr:
@@ -3437,7 +3431,7 @@ def array_compact(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3]
     """
-    return Expr(f.array_compact(_to_raw_expr(array)))
+    return Expr(f.array_compact(coerce_to_column(array)))
 
 
 def array_normalize(array: Expr | str) -> Expr:
@@ -3470,7 +3464,7 @@ def array_normalize(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py() is None
         True
     """
-    return Expr(f.array_normalize(_to_raw_expr(array)))
+    return Expr(f.array_normalize(coerce_to_column(array)))
 
 
 def cosine_distance(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -3520,7 +3514,7 @@ def cosine_distance(array1: Expr | str, array2: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         1.0
     """
-    return Expr(f.cosine_distance(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.cosine_distance(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def inner_product(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -3559,7 +3553,7 @@ def inner_product(array1: Expr | str, array2: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py() is None
         True
     """
-    return Expr(f.inner_product(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.inner_product(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def dot_product(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -3636,7 +3630,7 @@ def array_element(array: Expr | str, n: Expr | int) -> Expr:
         20
     """
     n = coerce_to_expr(n)
-    return Expr(f.array_element(_to_raw_expr(array), n.expr))
+    return Expr(f.array_element(coerce_to_column(array), n.expr))
 
 
 def array_empty(array: Expr | str) -> Expr:
@@ -3649,7 +3643,7 @@ def array_empty(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         False
     """
-    return Expr(f.array_empty(_to_raw_expr(array)))
+    return Expr(f.array_empty(coerce_to_column(array)))
 
 
 def list_empty(array: Expr | str) -> Expr:
@@ -3698,7 +3692,7 @@ def array_length(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.array_length(_to_raw_expr(array)))
+    return Expr(f.array_length(coerce_to_column(array)))
 
 
 def list_length(array: Expr | str) -> Expr:
@@ -3720,7 +3714,9 @@ def array_has(first_array: Expr | str, second_array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has(_to_raw_expr(first_array), _to_raw_expr(second_array)))
+    return Expr(
+        f.array_has(coerce_to_column(first_array), coerce_to_column(second_array))
+    )
 
 
 def array_has_all(first_array: Expr | str, second_array: Expr | str) -> Expr:
@@ -3736,7 +3732,9 @@ def array_has_all(first_array: Expr | str, second_array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has_all(_to_raw_expr(first_array), _to_raw_expr(second_array)))
+    return Expr(
+        f.array_has_all(coerce_to_column(first_array), coerce_to_column(second_array))
+    )
 
 
 def array_has_any(first_array: Expr | str, second_array: Expr | str) -> Expr:
@@ -3752,7 +3750,9 @@ def array_has_any(first_array: Expr | str, second_array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has_any(_to_raw_expr(first_array), _to_raw_expr(second_array)))
+    return Expr(
+        f.array_has_any(coerce_to_column(first_array), coerce_to_column(second_array))
+    )
 
 
 def array_contains(array: Expr | str, element: Expr) -> Expr:
@@ -3841,7 +3841,7 @@ def array_position(array: Expr | str, element: Expr, index: int | None = 1) -> E
         >>> result.collect_column("result")[0].as_py()
         4
     """
-    return Expr(f.array_position(_to_raw_expr(array), element.expr, index))
+    return Expr(f.array_position(coerce_to_column(array), ensure_expr(element), index))
 
 
 def array_indexof(array: Expr | str, element: Expr, index: int | None = 1) -> Expr:
@@ -3882,7 +3882,7 @@ def array_positions(array: Expr | str, element: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 3]
     """
-    return Expr(f.array_positions(_to_raw_expr(array), element.expr))
+    return Expr(f.array_positions(coerce_to_column(array), ensure_expr(element)))
 
 
 def list_positions(array: Expr | str, element: Expr) -> Expr:
@@ -3904,7 +3904,7 @@ def array_ndims(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         1
     """
-    return Expr(f.array_ndims(_to_raw_expr(array)))
+    return Expr(f.array_ndims(coerce_to_column(array)))
 
 
 def list_ndims(array: Expr | str) -> Expr:
@@ -3927,7 +3927,7 @@ def array_prepend(element: Expr, array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [0, 1, 2]
     """
-    return Expr(f.array_prepend(element.expr, _to_raw_expr(array)))
+    return Expr(f.array_prepend(ensure_expr(element), coerce_to_column(array)))
 
 
 def array_push_front(element: Expr, array: Expr | str) -> Expr:
@@ -3967,7 +3967,7 @@ def array_pop_back(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2]
     """
-    return Expr(f.array_pop_back(_to_raw_expr(array)))
+    return Expr(f.array_pop_back(coerce_to_column(array)))
 
 
 def array_pop_front(array: Expr | str) -> Expr:
@@ -3980,7 +3980,7 @@ def array_pop_front(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [2, 3]
     """
-    return Expr(f.array_pop_front(_to_raw_expr(array)))
+    return Expr(f.array_pop_front(coerce_to_column(array)))
 
 
 def list_pop_back(array: Expr | str) -> Expr:
@@ -4012,7 +4012,7 @@ def array_remove(array: Expr | str, element: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [2, 1]
     """
-    return Expr(f.array_remove(_to_raw_expr(array), element.expr))
+    return Expr(f.array_remove(coerce_to_column(array), ensure_expr(element)))
 
 
 def list_remove(array: Expr | str, element: Expr) -> Expr:
@@ -4038,7 +4038,9 @@ def array_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
         [2, 1]
     """
     max = coerce_to_expr(max)
-    return Expr(f.array_remove_n(_to_raw_expr(array), element.expr, max.expr))
+    return Expr(
+        f.array_remove_n(coerce_to_column(array), ensure_expr(element), max.expr)
+    )
 
 
 def list_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
@@ -4063,7 +4065,7 @@ def array_remove_all(array: Expr | str, element: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [2]
     """
-    return Expr(f.array_remove_all(_to_raw_expr(array), element.expr))
+    return Expr(f.array_remove_all(coerce_to_column(array), ensure_expr(element)))
 
 
 def list_remove_all(array: Expr | str, element: Expr) -> Expr:
@@ -4087,7 +4089,7 @@ def array_repeat(element: Expr, count: Expr | int) -> Expr:
         [3, 3, 3]
     """
     count = coerce_to_expr(count)
-    return Expr(f.array_repeat(element.expr, count.expr))
+    return Expr(f.array_repeat(ensure_expr(element), count.expr))
 
 
 def list_repeat(element: Expr, count: Expr | int) -> Expr:
@@ -4111,7 +4113,11 @@ def array_replace(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 1]
     """
-    return Expr(f.array_replace(_to_raw_expr(array), from_val.expr, to_val.expr))
+    return Expr(
+        f.array_replace(
+            coerce_to_column(array), ensure_expr(from_val), ensure_expr(to_val)
+        )
+    )
 
 
 def list_replace(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
@@ -4143,7 +4149,12 @@ def array_replace_n(
     """
     max = coerce_to_expr(max)
     return Expr(
-        f.array_replace_n(_to_raw_expr(array), from_val.expr, to_val.expr, max.expr)
+        f.array_replace_n(
+            coerce_to_column(array),
+            ensure_expr(from_val),
+            ensure_expr(to_val),
+            max.expr,
+        )
     )
 
 
@@ -4173,7 +4184,11 @@ def array_replace_all(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 9]
     """
-    return Expr(f.array_replace_all(_to_raw_expr(array), from_val.expr, to_val.expr))
+    return Expr(
+        f.array_replace_all(
+            coerce_to_column(array), ensure_expr(from_val), ensure_expr(to_val)
+        )
+    )
 
 
 def list_replace_all(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
@@ -4214,7 +4229,7 @@ def array_sort(
     nulls_first = "NULLS FIRST" if null_first else "NULLS LAST"
     return Expr(
         f.array_sort(
-            _to_raw_expr(array),
+            coerce_to_column(array),
             Expr.literal(pa.scalar(desc, type=pa.string())).expr,
             Expr.literal(pa.scalar(nulls_first, type=pa.string())).expr,
         )
@@ -4261,7 +4276,7 @@ def array_slice(
     stride = coerce_to_expr_or_none(stride)
     return Expr(
         f.array_slice(
-            _to_raw_expr(array),
+            coerce_to_column(array),
             begin.expr,
             end.expr,
             stride.expr if stride is not None else None,
@@ -4295,7 +4310,7 @@ def array_intersect(array1: Expr | str, array2: Expr | str) -> Expr:
         ... )
         [2, 3]
     """
-    return Expr(f.array_intersect(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.array_intersect(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def list_intersect(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -4321,7 +4336,7 @@ def array_union(array1: Expr | str, array2: Expr | str) -> Expr:
         ... )
         [1, 2, 3, 4]
     """
-    return Expr(f.array_union(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.array_union(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def list_union(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -4345,7 +4360,7 @@ def array_except(array1: Expr | str, array2: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1]
     """
-    return Expr(f.array_except(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.array_except(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def list_except(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -4372,7 +4387,7 @@ def array_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
         [1, 2, 0, 0]
     """
     size = coerce_to_expr(size)
-    return Expr(f.array_resize(_to_raw_expr(array), size.expr, value.expr))
+    return Expr(f.array_resize(coerce_to_column(array), size.expr, ensure_expr(value)))
 
 
 def list_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
@@ -4397,7 +4412,7 @@ def array_any_value(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         2
     """
-    return Expr(f.array_any_value(_to_raw_expr(array)))
+    return Expr(f.array_any_value(coerce_to_column(array)))
 
 
 def list_any_value(array: Expr | str) -> Expr:
@@ -4419,7 +4434,7 @@ def array_distance(array1: Expr | str, array2: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         2.0
     """
-    return Expr(f.array_distance(_to_raw_expr(array1), _to_raw_expr(array2)))
+    return Expr(f.array_distance(coerce_to_column(array1), coerce_to_column(array2)))
 
 
 def list_distance(array1: Expr | str, array2: Expr | str) -> Expr:
@@ -4441,7 +4456,7 @@ def array_max(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.array_max(_to_raw_expr(array)))
+    return Expr(f.array_max(coerce_to_column(array)))
 
 
 def list_max(array: Expr | str) -> Expr:
@@ -4463,7 +4478,7 @@ def array_min(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         1
     """
-    return Expr(f.array_min(_to_raw_expr(array)))
+    return Expr(f.array_min(coerce_to_column(array)))
 
 
 def list_min(array: Expr | str) -> Expr:
@@ -4485,7 +4500,7 @@ def array_reverse(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [3, 2, 1]
     """
-    return Expr(f.array_reverse(_to_raw_expr(array)))
+    return Expr(f.array_reverse(coerce_to_column(array)))
 
 
 def list_reverse(array: Expr | str) -> Expr:
@@ -4507,7 +4522,7 @@ def arrays_zip(*arrays: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [{'1': 1, '2': 3}, {'1': 2, '2': 4}]
     """
-    args = _to_raw_expr_list(arrays)
+    args = coerce_to_column_list(arrays)
     return Expr(f.arrays_zip(args))
 
 
@@ -4547,7 +4562,7 @@ def string_to_array(
     null_string = coerce_to_expr_or_none(null_string)
     return Expr(
         f.string_to_array(
-            _to_raw_expr(string),
+            coerce_to_column(string),
             delimiter.expr,
             null_string.expr if null_string is not None else None,
         )
@@ -4589,8 +4604,8 @@ def gen_series(start: Expr, stop: Expr, step: Expr | None = None) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 4, 7, 10]
     """
-    step_expr = step.expr if step is not None else None
-    return Expr(f.gen_series(start.expr, stop.expr, step_expr))
+    step_expr = ensure_expr_or_none(step)
+    return Expr(f.gen_series(ensure_expr(start), ensure_expr(stop), step_expr))
 
 
 def generate_series(start: Expr, stop: Expr, step: Expr | None = None) -> Expr:
@@ -4614,7 +4629,7 @@ def flatten(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    return Expr(f.flatten(_to_raw_expr(array)))
+    return Expr(f.flatten(coerce_to_column(array)))
 
 
 def cardinality(array: Expr | str) -> Expr:
@@ -4627,7 +4642,7 @@ def cardinality(array: Expr | str) -> Expr:
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.cardinality(_to_raw_expr(array)))
+    return Expr(f.cardinality(coerce_to_column(array)))
 
 
 def empty(array: Expr | str) -> Expr:
@@ -4724,7 +4739,7 @@ def map_keys(map: Expr | str) -> Expr:
         >>> result.collect_column("keys")[0].as_py()
         ['x', 'y']
     """
-    return Expr(f.map_keys(_to_raw_expr(map)))
+    return Expr(f.map_keys(coerce_to_column(map)))
 
 
 def map_values(map: Expr | str) -> Expr:
@@ -4739,7 +4754,7 @@ def map_values(map: Expr | str) -> Expr:
         >>> result.collect_column("vals")[0].as_py()
         [1, 2]
     """
-    return Expr(f.map_values(_to_raw_expr(map)))
+    return Expr(f.map_values(coerce_to_column(map)))
 
 
 def map_extract(map: Expr | str, key: Expr) -> Expr:
@@ -4759,7 +4774,7 @@ def map_extract(map: Expr | str, key: Expr) -> Expr:
         >>> result.collect_column("val")[0].as_py()
         [1]
     """
-    return Expr(f.map_extract(_to_raw_expr(map), key.expr))
+    return Expr(f.map_extract(coerce_to_column(map), ensure_expr(key)))
 
 
 def map_entries(map: Expr | str) -> Expr:
@@ -4774,7 +4789,7 @@ def map_entries(map: Expr | str) -> Expr:
         >>> result.collect_column("entries")[0].as_py()
         [{'key': 'x', 'value': 1}, {'key': 'y', 'value': 2}]
     """
-    return Expr(f.map_entries(_to_raw_expr(map)))
+    return Expr(f.map_entries(coerce_to_column(map)))
 
 
 def element_at(map: Expr | str, key: Expr) -> Expr:
@@ -4821,9 +4836,9 @@ def approx_distinct(
         >>> result.collect_column("v")[0].as_py() == 2
         True
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.approx_distinct(_to_raw_expr(expression), filter=filter_raw))
+    return Expr(f.approx_distinct(coerce_to_column(expression), filter=filter_raw))
 
 
 def approx_median(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -4854,8 +4869,8 @@ def approx_median(expression: Expr | str, filter: Expr | str | None = None) -> E
         >>> result.collect_column("v")[0].as_py()
         2.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.approx_median(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.approx_median(coerce_to_column(expression), filter=filter_raw))
 
 
 def approx_percentile_cont(
@@ -4905,7 +4920,7 @@ def approx_percentile_cont(
         3.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
         f.approx_percentile_cont(
             sort_expr_raw, percentile, num_centroids=num_centroids, filter=filter_raw
@@ -4955,11 +4970,11 @@ def approx_percentile_cont_with_weight(
         2.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
         f.approx_percentile_cont_with_weight(
             sort_expr_raw,
-            _to_raw_expr(weight),
+            coerce_to_column(weight),
             percentile,
             num_centroids=num_centroids,
             filter=filter_raw,
@@ -5004,7 +5019,7 @@ def percentile_cont(
         3.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(f.percentile_cont(sort_expr_raw, percentile, filter=filter_raw))
 
 
@@ -5067,11 +5082,11 @@ def array_agg(
         [2, 3]
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     return Expr(
         f.array_agg(
-            _to_raw_expr(expression),
+            coerce_to_column(expression),
             distinct=distinct,
             filter=filter_raw,
             order_by=order_by_raw,
@@ -5134,9 +5149,9 @@ def grouping(
     See Also:
         :py:class:`~datafusion.expr.GroupingSet`
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
-        f.grouping(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+        f.grouping(coerce_to_column(expression), distinct=distinct, filter=filter_raw)
     )
 
 
@@ -5180,8 +5195,10 @@ def avg(
         >>> result.collect_column("v")[0].as_py()
         2.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.avg(_to_raw_expr(expression), distinct=distinct, filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(
+        f.avg(coerce_to_column(expression), distinct=distinct, filter=filter_raw)
+    )
 
 
 def corr(
@@ -5214,8 +5231,10 @@ def corr(
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.corr(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(
+        f.corr(coerce_to_column(value_y), coerce_to_column(value_x), filter=filter_raw)
+    )
 
 
 def count(
@@ -5251,14 +5270,14 @@ def count(
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     if expressions is None:
         args = [Expr.literal(1).expr]
     elif isinstance(expressions, list):
-        args = _to_raw_expr_list(expressions)
+        args = coerce_to_column_list(expressions)
     else:
-        args = [_to_raw_expr(expressions)]
+        args = [coerce_to_column(expressions)]
 
     return Expr(f.count(*args, distinct=distinct, filter=filter_raw))
 
@@ -5297,9 +5316,11 @@ def covar_pop(
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
-        f.covar_pop(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw)
+        f.covar_pop(
+            coerce_to_column(value_y), coerce_to_column(value_x), filter=filter_raw
+        )
     )
 
 
@@ -5333,9 +5354,11 @@ def covar_samp(
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
-        f.covar_samp(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw)
+        f.covar_samp(
+            coerce_to_column(value_y), coerce_to_column(value_x), filter=filter_raw
+        )
     )
 
 
@@ -5375,8 +5398,8 @@ def max(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.max(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.max(coerce_to_column(expression), filter=filter_raw))
 
 
 def mean(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5420,9 +5443,9 @@ def median(
         >>> result.collect_column("v")[0].as_py()
         1.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
-        f.median(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+        f.median(coerce_to_column(expression), distinct=distinct, filter=filter_raw)
     )
 
 
@@ -5451,8 +5474,8 @@ def min(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.min(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.min(coerce_to_column(expression), filter=filter_raw))
 
 
 def sum(
@@ -5503,8 +5526,10 @@ def sum(
         >>> result.collect_column("v")[0].as_py()
         6
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.sum(_to_raw_expr(expression), distinct=distinct, filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(
+        f.sum(coerce_to_column(expression), distinct=distinct, filter=filter_raw)
+    )
 
 
 def stddev(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5532,8 +5557,8 @@ def stddev(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         1.41...
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.stddev(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.stddev(coerce_to_column(expression), filter=filter_raw))
 
 
 def stddev_pop(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5563,8 +5588,8 @@ def stddev_pop(expression: Expr | str, filter: Expr | str | None = None) -> Expr
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.stddev_pop(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.stddev_pop(coerce_to_column(expression), filter=filter_raw))
 
 
 def stddev_samp(arg: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5610,8 +5635,8 @@ def var_pop(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.var_pop(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.var_pop(coerce_to_column(expression), filter=filter_raw))
 
 
 def var_population(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5648,8 +5673,8 @@ def var_samp(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.var_sample(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.var_sample(coerce_to_column(expression), filter=filter_raw))
 
 
 def var_sample(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -5694,9 +5719,11 @@ def regr_avgx(
         >>> result.collect_column("v")[0].as_py()
         5.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_avgx(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(
+        f.regr_avgx(coerce_to_column(y), coerce_to_column(x), filter=filter_raw)
+    )
 
 
 def regr_avgy(
@@ -5732,9 +5759,11 @@ def regr_avgy(
         >>> result.collect_column("v")[0].as_py()
         2.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_avgy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(
+        f.regr_avgy(coerce_to_column(y), coerce_to_column(x), filter=filter_raw)
+    )
 
 
 def regr_count(
@@ -5770,9 +5799,11 @@ def regr_count(
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_count(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(
+        f.regr_count(coerce_to_column(y), coerce_to_column(x), filter=filter_raw)
+    )
 
 
 def regr_intercept(
@@ -5813,9 +5844,11 @@ def regr_intercept(
         >>> result.collect_column("v")[0].as_py()
         2.4
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_intercept(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(
+        f.regr_intercept(coerce_to_column(y), coerce_to_column(x), filter=filter_raw)
+    )
 
 
 def regr_r2(
@@ -5851,9 +5884,9 @@ def regr_r2(
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_r2(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(f.regr_r2(coerce_to_column(y), coerce_to_column(x), filter=filter_raw))
 
 
 def regr_slope(
@@ -5889,9 +5922,11 @@ def regr_slope(
         >>> result.collect_column("v")[0].as_py()
         0.1
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_slope(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(
+        f.regr_slope(coerce_to_column(y), coerce_to_column(x), filter=filter_raw)
+    )
 
 
 def regr_sxx(
@@ -5927,9 +5962,9 @@ def regr_sxx(
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_sxx(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(f.regr_sxx(coerce_to_column(y), coerce_to_column(x), filter=filter_raw))
 
 
 def regr_sxy(
@@ -5965,9 +6000,9 @@ def regr_sxy(
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_sxy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(f.regr_sxy(coerce_to_column(y), coerce_to_column(x), filter=filter_raw))
 
 
 def regr_syy(
@@ -6003,9 +6038,9 @@ def regr_syy(
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
-    return Expr(f.regr_syy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
+    return Expr(f.regr_syy(coerce_to_column(y), coerce_to_column(x), filter=filter_raw))
 
 
 def first_value(
@@ -6048,11 +6083,11 @@ def first_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     return Expr(
         f.first_value(
-            _to_raw_expr(expression),
+            coerce_to_column(expression),
             filter=filter_raw,
             order_by=order_by_raw,
             null_treatment=null_treatment.value,
@@ -6100,11 +6135,11 @@ def last_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     return Expr(
         f.last_value(
-            _to_raw_expr(expression),
+            coerce_to_column(expression),
             filter=filter_raw,
             order_by=order_by_raw,
             null_treatment=null_treatment.value,
@@ -6153,11 +6188,11 @@ def nth_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     return Expr(
         f.nth_value(
-            _to_raw_expr(expression),
+            coerce_to_column(expression),
             n,
             filter=filter_raw,
             order_by=order_by_raw,
@@ -6194,8 +6229,8 @@ def bit_and(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.bit_and(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.bit_and(coerce_to_column(expression), filter=filter_raw))
 
 
 def bit_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -6227,8 +6262,8 @@ def bit_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         6
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.bit_or(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.bit_or(coerce_to_column(expression), filter=filter_raw))
 
 
 def bit_xor(
@@ -6263,9 +6298,9 @@ def bit_xor(
         >>> result.collect_column("v")[0].as_py()
         5
     """
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
     return Expr(
-        f.bit_xor(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+        f.bit_xor(coerce_to_column(expression), distinct=distinct, filter=filter_raw)
     )
 
 
@@ -6300,8 +6335,8 @@ def bool_and(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         True
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.bool_and(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.bool_and(coerce_to_column(expression), filter=filter_raw))
 
 
 def bool_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
@@ -6335,8 +6370,8 @@ def bool_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
         >>> result.collect_column("v")[0].as_py()
         False
     """
-    filter_raw = _to_raw_expr_or_none(filter)
-    return Expr(f.bool_or(_to_raw_expr(expression), filter=filter_raw))
+    filter_raw = coerce_to_column_or_none(filter)
+    return Expr(f.bool_or(coerce_to_column(expression), filter=filter_raw))
 
 
 def lead(
@@ -6406,7 +6441,7 @@ def lead(
 
     return Expr(
         f.lead(
-            _to_raw_expr(arg),
+            coerce_to_column(arg),
             shift_offset,
             default_value,
             partition_by=partition_by_raw,
@@ -6479,7 +6514,7 @@ def lag(
 
     return Expr(
         f.lag(
-            _to_raw_expr(arg),
+            coerce_to_column(arg),
             shift_offset,
             default_value,
             partition_by=partition_by_raw,
@@ -6882,11 +6917,11 @@ def string_agg(
         'y,z'
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = _to_raw_expr_or_none(filter)
+    filter_raw = coerce_to_column_or_none(filter)
 
     return Expr(
         f.string_agg(
-            _to_raw_expr(expression),
+            coerce_to_column(expression),
             delimiter,
             filter=filter_raw,
             order_by=order_by_raw,
