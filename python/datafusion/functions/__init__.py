@@ -23,13 +23,19 @@ with other expressions and passed to
 :py:meth:`~datafusion.dataframe.DataFrame.filter`,
 :py:meth:`~datafusion.dataframe.DataFrame.aggregate`, and
 :py:meth:`~datafusion.dataframe.DataFrame.window`. The module is conventionally
-imported as ``F`` so calls read like ``F.sum(col("price"))``.
+imported as ``F`` so calls read like ``F.sum("price")``.
+
+Arguments that hold the data being operated on also accept a plain string, which
+is read as a column name: ``F.sum("price")`` is the same as
+``F.sum(col("price"))``. Arguments that hold a fixed scalar instead read a plain
+string as a literal, so ``F.array_to_string("tags", ",")`` joins the values of
+column ``tags`` with a comma.
 
 Examples:
     >>> from datafusion import functions as F
     >>> ctx = dfn.SessionContext()
     >>> df = ctx.from_pydict({"a": [1, 2, 3, 4]})
-    >>> df.aggregate([], [F.sum(col("a")).alias("total")]).to_pydict()
+    >>> df.aggregate([], [F.sum("a").alias("total")]).to_pydict()
     {'total': [10]}
 
 See :ref:`aggregation` and :ref:`window_functions` in the online documentation
@@ -45,7 +51,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
 
 from datafusion._internal import functions as f
 from datafusion.common import NullTreatment
@@ -54,6 +60,9 @@ from datafusion.expr import (
     Expr,
     SortExpr,
     SortKey,
+    _to_raw_expr,
+    _to_raw_expr_list,
+    _to_raw_expr_or_none,
     coerce_to_expr,
     coerce_to_expr_list,
     coerce_to_expr_or_none,
@@ -401,25 +410,25 @@ __all__ = [
 ]
 
 
-def isnan(expr: Expr) -> Expr:
+def isnan(expr: Expr | str) -> Expr:
     """Returns true if a given number is +NaN or -NaN otherwise returns false.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, np.nan]})
-        >>> result = df.select(dfn.functions.isnan(dfn.col("a")).alias("isnan"))
+        >>> result = df.select(dfn.functions.isnan("a").alias("isnan"))
         >>> result.collect_column("isnan")[1].as_py()
         True
     """
-    return Expr(f.isnan(expr.expr))
+    return Expr(f.isnan(_to_raw_expr(expr)))
 
 
-def is_nan(expr: Expr) -> Expr:
+def is_nan(expr: Expr | str) -> Expr:
     """Alias for :func:`isnan`."""
     return isnan(expr)
 
 
-def nullif(expr1: Expr, expr2: Expr) -> Expr:
+def nullif(expr1: Expr | str, expr2: Expr | str) -> Expr:
     """Returns NULL if expr1 equals expr2; otherwise it returns expr1.
 
     This can be used to perform the inverse operation of the COALESCE expression.
@@ -427,62 +436,58 @@ def nullif(expr1: Expr, expr2: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2], "b": [1, 3]})
-        >>> result = df.select(
-        ...     dfn.functions.nullif(dfn.col("a"), dfn.col("b")).alias("nullif"))
+        >>> result = df.select(dfn.functions.nullif("a", "b").alias("nullif"))
         >>> result.collect_column("nullif").to_pylist()
         [None, 2]
     """
-    return Expr(f.nullif(expr1.expr, expr2.expr))
+    return Expr(f.nullif(_to_raw_expr(expr1), _to_raw_expr(expr2)))
 
 
-def encode(expr: Expr, encoding: Expr | str) -> Expr:
+def encode(expr: Expr | str, encoding: Expr | str) -> Expr:
     """Encode the ``input``, using the ``encoding``. encoding can be base64 or hex.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.encode(dfn.col("a"), "base64").alias("enc"))
+        >>> result = df.select(dfn.functions.encode("a", "base64").alias("enc"))
         >>> result.collect_column("enc")[0].as_py()
         'aGVsbG8'
     """
     _warn_if_expr_for_literal_arg(encoding, "encode", "encoding")
     encoding = coerce_to_expr(encoding)
-    return Expr(f.encode(expr.expr, encoding.expr))
+    return Expr(f.encode(_to_raw_expr(expr), encoding.expr))
 
 
-def decode(expr: Expr, encoding: Expr | str) -> Expr:
+def decode(expr: Expr | str, encoding: Expr | str) -> Expr:
     """Decode the ``input``, using the ``encoding``. encoding can be base64 or hex.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["aGVsbG8="]})
-        >>> result = df.select(
-        ...     dfn.functions.decode(dfn.col("a"), "base64").alias("dec"))
+        >>> result = df.select(dfn.functions.decode("a", "base64").alias("dec"))
         >>> result.collect_column("dec")[0].as_py()
         b'hello'
     """
     _warn_if_expr_for_literal_arg(encoding, "decode", "encoding")
     encoding = coerce_to_expr(encoding)
-    return Expr(f.decode(expr.expr, encoding.expr))
+    return Expr(f.decode(_to_raw_expr(expr), encoding.expr))
 
 
-def array_to_string(expr: Expr, delimiter: Expr | str) -> Expr:
+def array_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
     """Converts each element to its text representation.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_to_string(dfn.col("a"), ",").alias("s"))
+        >>> result = df.select(dfn.functions.array_to_string("a", ",").alias("s"))
         >>> result.collect_column("s")[0].as_py()
         '1,2,3'
     """
     delimiter = coerce_to_expr(delimiter)
-    return Expr(f.array_to_string(expr.expr, delimiter.expr.cast(pa.string())))
+    return Expr(f.array_to_string(_to_raw_expr(expr), delimiter.expr.cast(pa.string())))
 
 
-def array_join(expr: Expr, delimiter: Expr | str) -> Expr:
+def array_join(expr: Expr | str, delimiter: Expr | str) -> Expr:
     """Converts each element to its text representation.
 
     See Also:
@@ -491,7 +496,7 @@ def array_join(expr: Expr, delimiter: Expr | str) -> Expr:
     return array_to_string(expr, delimiter)
 
 
-def list_to_string(expr: Expr, delimiter: Expr | str) -> Expr:
+def list_to_string(expr: Expr | str, delimiter: Expr | str) -> Expr:
     """Converts each element to its text representation.
 
     See Also:
@@ -500,7 +505,7 @@ def list_to_string(expr: Expr, delimiter: Expr | str) -> Expr:
     return array_to_string(expr, delimiter)
 
 
-def list_join(expr: Expr, delimiter: Expr | str) -> Expr:
+def list_join(expr: Expr | str, delimiter: Expr | str) -> Expr:
     """Converts each element to its text representation.
 
     See Also:
@@ -522,7 +527,7 @@ def lambda_var(name: str) -> Expr:
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
         >>> double_fn = F.lambda_(["v"], F.lambda_var("v") * lit(2))
         >>> df.select(
-        ...     F.array_transform(col("a"), double_fn).alias("d")
+        ...     F.array_transform("a", double_fn).alias("d")
         ... ).collect_column("d")[0].as_py()
         [2, 4, 6]
 
@@ -532,7 +537,7 @@ def lambda_var(name: str) -> Expr:
     return Expr(f.lambda_var(name))
 
 
-def lambda_(params: list[str], body: Expr) -> Expr:
+def lambda_(params: list[str], body: Expr | str) -> Expr:
     """Create a lambda expression from parameter names and a body expression.
 
     This is the explicit form of building a lambda. Most callers can instead
@@ -550,14 +555,14 @@ def lambda_(params: list[str], body: Expr) -> Expr:
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
         >>> double_fn = F.lambda_(["v"], F.lambda_var("v") * lit(2))
         >>> df.select(
-        ...     F.array_transform(col("a"), double_fn).alias("d")
+        ...     F.array_transform("a", double_fn).alias("d")
         ... ).collect_column("d")[0].as_py()
         [2, 4, 6]
 
     See Also:
         :py:func:`lambda_var`, :py:func:`array_transform`, :py:func:`array_any_match`.
     """
-    return Expr(f.lambda_(params, body.expr))
+    return Expr(f.lambda_(params, _to_raw_expr(body)))
 
 
 def _to_lambda(fn: Expr | Callable[..., Any]) -> Expr:
@@ -582,7 +587,7 @@ def _to_lambda(fn: Expr | Callable[..., Any]) -> Expr:
     return lambda_(params, body)
 
 
-def array_transform(array: Expr, transform: Expr | Callable[..., Any]) -> Expr:
+def array_transform(array: Expr | str, transform: Expr | Callable[..., Any]) -> Expr:
     """Transform each element of ``array`` with a lambda.
 
     ``transform`` may be a Python callable, which is converted to a lambda
@@ -595,7 +600,7 @@ def array_transform(array: Expr, transform: Expr | Callable[..., Any]) -> Expr:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
         >>> df.select(
-        ...     F.array_transform(col("a"), lambda v: v * 2).alias("d")
+        ...     F.array_transform("a", lambda v: v * 2).alias("d")
         ... ).collect_column("d")[0].as_py()
         [2, 4, 6]
 
@@ -603,17 +608,17 @@ def array_transform(array: Expr, transform: Expr | Callable[..., Any]) -> Expr:
 
         >>> double_fn = F.lambda_(["v"], F.lambda_var("v") * lit(2))
         >>> df.select(
-        ...     F.array_transform(col("a"), double_fn).alias("d")
+        ...     F.array_transform("a", double_fn).alias("d")
         ... ).collect_column("d")[0].as_py()
         [2, 4, 6]
 
     See Also:
         :py:func:`array_any_match`, :py:func:`lambda_`.
     """
-    return Expr(f.array_transform(array.expr, _to_lambda(transform).expr))
+    return Expr(f.array_transform(_to_raw_expr(array), _to_lambda(transform).expr))
 
 
-def list_transform(array: Expr, transform: Expr | Callable[..., Any]) -> Expr:
+def list_transform(array: Expr | str, transform: Expr | Callable[..., Any]) -> Expr:
     """Transform each element of a list with a lambda.
 
     See Also:
@@ -622,7 +627,7 @@ def list_transform(array: Expr, transform: Expr | Callable[..., Any]) -> Expr:
     return array_transform(array, transform)
 
 
-def array_any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
+def array_any_match(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
     """Return ``True`` if any element of ``array`` satisfies ``predicate``.
 
     ``predicate`` may be a Python callable, converted to a lambda
@@ -635,7 +640,7 @@ def array_any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
         >>> df.select(
-        ...     F.array_any_match(col("a"), lambda v: v > 2).alias("m")
+        ...     F.array_any_match("a", lambda v: v > 2).alias("m")
         ... ).collect_column("m")[0].as_py()
         True
 
@@ -643,17 +648,17 @@ def array_any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
 
         >>> predicate = F.lambda_(["v"], F.lambda_var("v") > lit(2))
         >>> df.select(
-        ...     F.array_any_match(col("a"), predicate).alias("m")
+        ...     F.array_any_match("a", predicate).alias("m")
         ... ).collect_column("m")[0].as_py()
         True
 
     See Also:
         :py:func:`array_transform`, :py:func:`lambda_`.
     """
-    return Expr(f.array_any_match(array.expr, _to_lambda(predicate).expr))
+    return Expr(f.array_any_match(_to_raw_expr(array), _to_lambda(predicate).expr))
 
 
-def any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
+def any_match(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
     """Return ``True`` if any element of an array satisfies a predicate.
 
     See Also:
@@ -662,7 +667,7 @@ def any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
     return array_any_match(array, predicate)
 
 
-def list_any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
+def list_any_match(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
     """Return ``True`` if any element of a list satisfies a predicate.
 
     See Also:
@@ -671,7 +676,7 @@ def list_any_match(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
     return array_any_match(array, predicate)
 
 
-def array_filter(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
+def array_filter(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
     """Keep the elements of ``array`` for which ``predicate`` is ``True``.
 
     ``predicate`` may be a Python callable, converted to a lambda
@@ -685,7 +690,7 @@ def array_filter(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3, 4, 5]]})
         >>> df.select(
-        ...     F.array_filter(col("a"), lambda v: v > 2).alias("f")
+        ...     F.array_filter("a", lambda v: v > 2).alias("f")
         ... ).collect_column("f")[0].as_py()
         [3, 4, 5]
 
@@ -693,17 +698,17 @@ def array_filter(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
 
         >>> predicate = F.lambda_(["v"], F.lambda_var("v") > lit(2))
         >>> df.select(
-        ...     F.array_filter(col("a"), predicate).alias("f")
+        ...     F.array_filter("a", predicate).alias("f")
         ... ).collect_column("f")[0].as_py()
         [3, 4, 5]
 
     See Also:
         :py:func:`array_transform`, :py:func:`array_any_match`, :py:func:`lambda_`.
     """
-    return Expr(f.array_filter(array.expr, _to_lambda(predicate).expr))
+    return Expr(f.array_filter(_to_raw_expr(array), _to_lambda(predicate).expr))
 
 
-def list_filter(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
+def list_filter(array: Expr | str, predicate: Expr | Callable[..., Any]) -> Expr:
     """Keep the elements of a list for which a predicate is ``True``.
 
     See Also:
@@ -712,7 +717,7 @@ def list_filter(array: Expr, predicate: Expr | Callable[..., Any]) -> Expr:
     return array_filter(array, predicate)
 
 
-def in_list(arg: Expr, values: list[Expr], negated: bool = False) -> Expr:
+def in_list(arg: Expr | str, values: list[Expr], negated: bool = False) -> Expr:
     """Returns whether the argument is contained within the list ``values``.
 
     Examples:
@@ -720,7 +725,7 @@ def in_list(arg: Expr, values: list[Expr], negated: bool = False) -> Expr:
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
         >>> result = df.select(
         ...     dfn.functions.in_list(
-        ...         dfn.col("a"), [dfn.lit(1), dfn.lit(3)]
+        ...         "a", [dfn.lit(1), dfn.lit(3)]
         ...     ).alias("in")
         ... )
         >>> result.collect_column("in").to_pylist()
@@ -728,7 +733,7 @@ def in_list(arg: Expr, values: list[Expr], negated: bool = False) -> Expr:
 
         >>> result = df.select(
         ...     dfn.functions.in_list(
-        ...         dfn.col("a"), [dfn.lit(1), dfn.lit(3)],
+        ...         "a", [dfn.lit(1), dfn.lit(3)],
         ...         negated=True,
         ...     ).alias("not_in")
         ... )
@@ -736,10 +741,10 @@ def in_list(arg: Expr, values: list[Expr], negated: bool = False) -> Expr:
         [False, True, False]
     """
     values = [v.expr for v in values]
-    return Expr(f.in_list(arg.expr, values, negated))
+    return Expr(f.in_list(_to_raw_expr(arg), values, negated))
 
 
-def digest(value: Expr, method: Expr | str) -> Expr:
+def digest(value: Expr | str, method: Expr | str) -> Expr:
     """Computes the binary hash of an expression using the specified algorithm.
 
     Standard algorithms are md5, sha224, sha256, sha384, sha512, blake2s,
@@ -748,32 +753,30 @@ def digest(value: Expr, method: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.digest(dfn.col("a"), "md5").alias("d"))
+        >>> result = df.select(dfn.functions.digest("a", "md5").alias("d"))
         >>> len(result.collect_column("d")[0].as_py()) > 0
         True
     """
     _warn_if_expr_for_literal_arg(method, "digest", "method")
     method = coerce_to_expr(method)
-    return Expr(f.digest(value.expr, method.expr))
+    return Expr(f.digest(_to_raw_expr(value), method.expr))
 
 
-def contains(string: Expr, search_str: Expr | str) -> Expr:
+def contains(string: Expr | str, search_str: Expr | str) -> Expr:
     """Returns true if ``search_str`` is found within ``string`` (case-sensitive).
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["the quick brown fox"]})
-        >>> result = df.select(
-        ...     dfn.functions.contains(dfn.col("a"), "brown").alias("c"))
+        >>> result = df.select(dfn.functions.contains("a", "brown").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         True
     """
     search_str = coerce_to_expr(search_str)
-    return Expr(f.contains(string.expr, search_str.expr))
+    return Expr(f.contains(_to_raw_expr(string), search_str.expr))
 
 
-def concat(*args: Expr) -> Expr:
+def concat(*args: Expr | str) -> Expr:
     """Concatenates the text representations of all the arguments.
 
     NULL arguments are ignored.
@@ -781,17 +784,15 @@ def concat(*args: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"], "b": [" world"]})
-        >>> result = df.select(
-        ...     dfn.functions.concat(dfn.col("a"), dfn.col("b")).alias("c")
-        ... )
+        >>> result = df.select(dfn.functions.concat("a", "b").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         'hello world'
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.concat(args))
 
 
-def concat_ws(separator: str, *args: Expr) -> Expr:
+def concat_ws(separator: str, *args: Expr | str) -> Expr:
     """Concatenates the list ``args`` with the separator.
 
     ``NULL`` arguments are ignored. ``separator`` should not be ``NULL``.
@@ -799,33 +800,32 @@ def concat_ws(separator: str, *args: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"], "b": ["world"]})
-        >>> result = df.select(
-        ...     dfn.functions.concat_ws("-", dfn.col("a"), dfn.col("b")).alias("c"))
+        >>> result = df.select(dfn.functions.concat_ws("-", "a", "b").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         'hello-world'
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.concat_ws(separator, args))
 
 
-def order_by(expr: Expr, ascending: bool = True, nulls_first: bool = True) -> SortExpr:
+def order_by(
+    expr: Expr | str, ascending: bool = True, nulls_first: bool = True
+) -> SortExpr:
     """Creates a new sort expression.
 
     Examples:
-        >>> sort_expr = dfn.functions.order_by(
-        ...     dfn.col("a"), ascending=False)
+        >>> sort_expr = dfn.functions.order_by("a", ascending=False)
         >>> sort_expr.ascending()
         False
 
-        >>> sort_expr = dfn.functions.order_by(
-        ...     dfn.col("a"), ascending=True, nulls_first=False)
+        >>> sort_expr = dfn.functions.order_by("a", ascending=True, nulls_first=False)
         >>> sort_expr.nulls_first()
         False
     """
     return SortExpr(expr, ascending=ascending, nulls_first=nulls_first)
 
 
-def alias(expr: Expr, name: str, metadata: dict[str, str] | None = None) -> Expr:
+def alias(expr: Expr | str, name: str, metadata: dict[str, str] | None = None) -> Expr:
     """Creates an alias expression with an optional metadata dictionary.
 
     Args:
@@ -836,25 +836,17 @@ def alias(expr: Expr, name: str, metadata: dict[str, str] | None = None) -> Expr
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2]})
-        >>> result = df.select(
-        ...     dfn.functions.alias(
-        ...         dfn.col("a"), "b"
-        ...     )
-        ... )
+        >>> result = df.select(dfn.functions.alias("a", "b"))
         >>> result.collect_column("b")[0].as_py()
         1
 
-        >>> result = df.select(
-        ...     dfn.functions.alias(
-        ...         dfn.col("a"), "b", metadata={"info": "test"}
-        ...     )
-        ... )
+        >>> result = df.select(dfn.functions.alias("a", "b", metadata={"info": "test"}))
         >>> result.schema()
         b: int64
           -- field metadata --
           info: 'test'
     """
-    return Expr(f.alias(expr.expr, name, metadata))
+    return Expr(f.alias(_to_raw_expr(expr), name, metadata))
 
 
 def col(name: str) -> Expr:
@@ -869,7 +861,7 @@ def col(name: str) -> Expr:
     return Expr(f.col(name))
 
 
-def count_star(filter: Expr | None = None) -> Expr:
+def count_star(filter: Expr | str | None = None) -> Expr:
     """Create a COUNT(1) aggregate expression.
 
     This aggregate function will count all of the rows in the partition.
@@ -899,7 +891,7 @@ def count_star(filter: Expr | None = None) -> Expr:
     return count(Expr.literal(1), filter=filter)
 
 
-def case(expr: Expr) -> CaseBuilder:
+def case(expr: Expr | str) -> CaseBuilder:
     """Create a case expression.
 
     Create a :py:class:`~datafusion.expr.CaseBuilder` to match cases for the
@@ -910,15 +902,15 @@ def case(expr: Expr) -> CaseBuilder:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
         >>> result = df.select(
-        ...     dfn.functions.case(dfn.col("a")).when(dfn.lit(1),
+        ...     dfn.functions.case("a").when(dfn.lit(1),
         ...     dfn.lit("one")).otherwise(dfn.lit("other")).alias("c"))
         >>> result.collect_column("c")[0].as_py()
         'one'
     """
-    return CaseBuilder(f.case(expr.expr))
+    return CaseBuilder(f.case(_to_raw_expr(expr)))
 
 
-def when(when: Expr, then: Expr) -> CaseBuilder:
+def when(when: Expr | str, then: Expr) -> CaseBuilder:
     """Create a case expression that has no base expression.
 
     Create a :py:class:`~datafusion.expr.CaseBuilder` to match cases for the
@@ -934,234 +926,233 @@ def when(when: Expr, then: Expr) -> CaseBuilder:
         >>> result.collect_column("c")[2].as_py()
         'big'
     """
-    return CaseBuilder(f.when(when.expr, then.expr))
+    return CaseBuilder(f.when(_to_raw_expr(when), then.expr))
 
 
 # scalar functions
-def abs(arg: Expr) -> Expr:
+def abs(arg: Expr | str) -> Expr:
     """Return the absolute value of a given number.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [-1, 0, 1]})
-        >>> result = df.select(dfn.functions.abs(dfn.col("a")).alias("abs"))
+        >>> result = df.select(dfn.functions.abs("a").alias("abs"))
         >>> result.collect_column("abs")[0].as_py()
         1
     """
-    return Expr(f.abs(arg.expr))
+    return Expr(f.abs(_to_raw_expr(arg)))
 
 
-def acos(arg: Expr) -> Expr:
+def acos(arg: Expr | str) -> Expr:
     """Returns the arc cosine or inverse cosine of a number.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0]})
-        >>> result = df.select(dfn.functions.acos(dfn.col("a")).alias("acos"))
+        >>> result = df.select(dfn.functions.acos("a").alias("acos"))
         >>> result.collect_column("acos")[0].as_py()
         0.0
     """
-    return Expr(f.acos(arg.expr))
+    return Expr(f.acos(_to_raw_expr(arg)))
 
 
-def acosh(arg: Expr) -> Expr:
+def acosh(arg: Expr | str) -> Expr:
     """Returns inverse hyperbolic cosine.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0]})
-        >>> result = df.select(dfn.functions.acosh(dfn.col("a")).alias("acosh"))
+        >>> result = df.select(dfn.functions.acosh("a").alias("acosh"))
         >>> result.collect_column("acosh")[0].as_py()
         0.0
     """
-    return Expr(f.acosh(arg.expr))
+    return Expr(f.acosh(_to_raw_expr(arg)))
 
 
-def ascii(arg: Expr) -> Expr:
+def ascii(arg: Expr | str) -> Expr:
     """Returns the numeric code of the first character of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["a","b","c"]})
-        >>> ascii_df = df.select(dfn.functions.ascii(dfn.col("a")).alias("ascii"))
+        >>> ascii_df = df.select(dfn.functions.ascii("a").alias("ascii"))
         >>> ascii_df.collect_column("ascii")[0].as_py()
         97
     """
-    return Expr(f.ascii(arg.expr))
+    return Expr(f.ascii(_to_raw_expr(arg)))
 
 
-def asin(arg: Expr) -> Expr:
+def asin(arg: Expr | str) -> Expr:
     """Returns the arc sine or inverse sine of a number.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.asin(dfn.col("a")).alias("asin"))
+        >>> result = df.select(dfn.functions.asin("a").alias("asin"))
         >>> result.collect_column("asin")[0].as_py()
         0.0
     """
-    return Expr(f.asin(arg.expr))
+    return Expr(f.asin(_to_raw_expr(arg)))
 
 
-def asinh(arg: Expr) -> Expr:
+def asinh(arg: Expr | str) -> Expr:
     """Returns inverse hyperbolic sine.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.asinh(dfn.col("a")).alias("asinh"))
+        >>> result = df.select(dfn.functions.asinh("a").alias("asinh"))
         >>> result.collect_column("asinh")[0].as_py()
         0.0
     """
-    return Expr(f.asinh(arg.expr))
+    return Expr(f.asinh(_to_raw_expr(arg)))
 
 
-def atan(arg: Expr) -> Expr:
+def atan(arg: Expr | str) -> Expr:
     """Returns inverse tangent of a number.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.atan(dfn.col("a")).alias("atan"))
+        >>> result = df.select(dfn.functions.atan("a").alias("atan"))
         >>> result.collect_column("atan")[0].as_py()
         0.0
     """
-    return Expr(f.atan(arg.expr))
+    return Expr(f.atan(_to_raw_expr(arg)))
 
 
-def atanh(arg: Expr) -> Expr:
+def atanh(arg: Expr | str) -> Expr:
     """Returns inverse hyperbolic tangent.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.atanh(dfn.col("a")).alias("atanh"))
+        >>> result = df.select(dfn.functions.atanh("a").alias("atanh"))
         >>> result.collect_column("atanh")[0].as_py()
         0.0
     """
-    return Expr(f.atanh(arg.expr))
+    return Expr(f.atanh(_to_raw_expr(arg)))
 
 
-def atan2(y: Expr, x: Expr) -> Expr:
+def atan2(y: Expr | str, x: Expr | str) -> Expr:
     """Returns inverse tangent of a division given in the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [0.0], "x": [1.0]})
-        >>> result = df.select(
-        ...     dfn.functions.atan2(dfn.col("y"), dfn.col("x")).alias("atan2"))
+        >>> result = df.select(dfn.functions.atan2("y", "x").alias("atan2"))
         >>> result.collect_column("atan2")[0].as_py()
         0.0
     """
-    return Expr(f.atan2(y.expr, x.expr))
+    return Expr(f.atan2(_to_raw_expr(y), _to_raw_expr(x)))
 
 
-def bit_length(arg: Expr) -> Expr:
+def bit_length(arg: Expr | str) -> Expr:
     """Returns the number of bits in the string argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["a","b","c"]})
-        >>> bit_df = df.select(dfn.functions.bit_length(dfn.col("a")).alias("bit_len"))
+        >>> bit_df = df.select(dfn.functions.bit_length("a").alias("bit_len"))
         >>> bit_df.collect_column("bit_len")[0].as_py()
         8
     """
-    return Expr(f.bit_length(arg.expr))
+    return Expr(f.bit_length(_to_raw_expr(arg)))
 
 
-def btrim(arg: Expr) -> Expr:
+def btrim(arg: Expr | str) -> Expr:
     """Removes all characters, spaces by default, from both sides of a string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [" a  "]})
-        >>> trim_df = df.select(dfn.functions.btrim(dfn.col("a")).alias("trimmed"))
+        >>> trim_df = df.select(dfn.functions.btrim("a").alias("trimmed"))
         >>> trim_df.collect_column("trimmed")[0].as_py()
         'a'
     """
-    return Expr(f.btrim(arg.expr))
+    return Expr(f.btrim(_to_raw_expr(arg)))
 
 
-def cbrt(arg: Expr) -> Expr:
+def cbrt(arg: Expr | str) -> Expr:
     """Returns the cube root of a number.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [27]})
-        >>> cbrt_df = df.select(dfn.functions.cbrt(dfn.col("a")).alias("cbrt"))
+        >>> cbrt_df = df.select(dfn.functions.cbrt("a").alias("cbrt"))
         >>> cbrt_df.collect_column("cbrt")[0].as_py()
         3.0
     """
-    return Expr(f.cbrt(arg.expr))
+    return Expr(f.cbrt(_to_raw_expr(arg)))
 
 
-def ceil(arg: Expr) -> Expr:
+def ceil(arg: Expr | str) -> Expr:
     """Returns the nearest integer greater than or equal to argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.9]})
-        >>> ceil_df = df.select(dfn.functions.ceil(dfn.col("a")).alias("ceil"))
+        >>> ceil_df = df.select(dfn.functions.ceil("a").alias("ceil"))
         >>> ceil_df.collect_column("ceil")[0].as_py()
         2.0
     """
-    return Expr(f.ceil(arg.expr))
+    return Expr(f.ceil(_to_raw_expr(arg)))
 
 
-def character_length(arg: Expr) -> Expr:
+def character_length(arg: Expr | str) -> Expr:
     """Returns the number of characters in the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["abc","b","c"]})
         >>> char_len_df = df.select(
-        ...     dfn.functions.character_length(dfn.col("a")).alias("char_len"))
+        ...     dfn.functions.character_length("a").alias("char_len"))
         >>> char_len_df.collect_column("char_len")[0].as_py()
         3
     """
-    return Expr(f.character_length(arg.expr))
+    return Expr(f.character_length(_to_raw_expr(arg)))
 
 
-def length(string: Expr) -> Expr:
+def length(string: Expr | str) -> Expr:
     """The number of characters in the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.length(dfn.col("a")).alias("len"))
+        >>> result = df.select(dfn.functions.length("a").alias("len"))
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.length(string.expr))
+    return Expr(f.length(_to_raw_expr(string)))
 
 
-def char_length(string: Expr) -> Expr:
+def char_length(string: Expr | str) -> Expr:
     """The number of characters in the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.char_length(dfn.col("a")).alias("len"))
+        >>> result = df.select(dfn.functions.char_length("a").alias("len"))
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.char_length(string.expr))
+    return Expr(f.char_length(_to_raw_expr(string)))
 
 
-def chr(arg: Expr) -> Expr:
+def chr(arg: Expr | str) -> Expr:
     """Converts the Unicode code point to a UTF8 character.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [65]})
-        >>> result = df.select(dfn.functions.chr(dfn.col("a")).alias("chr"))
+        >>> result = df.select(dfn.functions.chr("a").alias("chr"))
         >>> result.collect_column("chr")[0].as_py()
         'A'
     """
-    return Expr(f.chr(arg.expr))
+    return Expr(f.chr(_to_raw_expr(arg)))
 
 
-def coalesce(*args: Expr) -> Expr:
+def coalesce(*args: Expr | str) -> Expr:
     """Returns the value of the first expr in ``args`` which is not NULL.
 
     Args:
@@ -1170,115 +1161,110 @@ def coalesce(*args: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [None, 1], "b": [2, 3]})
-        >>> result = df.select(
-        ...     dfn.functions.coalesce(dfn.col("a"), dfn.col("b")).alias("c"))
+        >>> result = df.select(dfn.functions.coalesce("a", "b").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         2
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.coalesce(*args))
 
 
-def cos(arg: Expr) -> Expr:
+def cos(arg: Expr | str) -> Expr:
     """Returns the cosine of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0,-1,1]})
-        >>> cos_df = df.select(dfn.functions.cos(dfn.col("a")).alias("cos"))
+        >>> cos_df = df.select(dfn.functions.cos("a").alias("cos"))
         >>> cos_df.collect_column("cos")[0].as_py()
         1.0
     """
-    return Expr(f.cos(arg.expr))
+    return Expr(f.cos(_to_raw_expr(arg)))
 
 
-def cosh(arg: Expr) -> Expr:
+def cosh(arg: Expr | str) -> Expr:
     """Returns the hyperbolic cosine of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0,-1,1]})
-        >>> cosh_df = df.select(dfn.functions.cosh(dfn.col("a")).alias("cosh"))
+        >>> cosh_df = df.select(dfn.functions.cosh("a").alias("cosh"))
         >>> cosh_df.collect_column("cosh")[0].as_py()
         1.0
     """
-    return Expr(f.cosh(arg.expr))
+    return Expr(f.cosh(_to_raw_expr(arg)))
 
 
-def cot(arg: Expr) -> Expr:
+def cot(arg: Expr | str) -> Expr:
     """Returns the cotangent of the argument.
 
     Examples:
         >>> from math import pi
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [pi / 4]})
-        >>> result = df.select(
-        ...     dfn.functions.cot(dfn.col("a")).alias("cot")
-        ... )
+        >>> result = df.select(dfn.functions.cot("a").alias("cot"))
         >>> result.collect_column("cot")[0].as_py()
         1.0...
     """
-    return Expr(f.cot(arg.expr))
+    return Expr(f.cot(_to_raw_expr(arg)))
 
 
-def degrees(arg: Expr) -> Expr:
+def degrees(arg: Expr | str) -> Expr:
     """Converts the argument from radians to degrees.
 
     Examples:
         >>> from math import pi
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0,pi,2*pi]})
-        >>> deg_df = df.select(dfn.functions.degrees(dfn.col("a")).alias("deg"))
+        >>> deg_df = df.select(dfn.functions.degrees("a").alias("deg"))
         >>> deg_df.collect_column("deg")[2].as_py()
         360.0
     """
-    return Expr(f.degrees(arg.expr))
+    return Expr(f.degrees(_to_raw_expr(arg)))
 
 
-def ends_with(arg: Expr, suffix: Expr | str) -> Expr:
+def ends_with(arg: Expr | str, suffix: Expr | str) -> Expr:
     """Returns true if the ``string`` ends with the ``suffix``, false otherwise.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["abc","b","c"]})
         >>> ends_with_df = df.select(
-        ...     dfn.functions.ends_with(dfn.col("a"), "c").alias("ends_with"))
+        ...     dfn.functions.ends_with("a", "c").alias("ends_with"))
         >>> ends_with_df.collect_column("ends_with")[0].as_py()
         True
     """
     suffix = coerce_to_expr(suffix)
-    return Expr(f.ends_with(arg.expr, suffix.expr))
+    return Expr(f.ends_with(_to_raw_expr(arg), suffix.expr))
 
 
-def exp(arg: Expr) -> Expr:
+def exp(arg: Expr | str) -> Expr:
     """Returns the exponential of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.exp(dfn.col("a")).alias("exp"))
+        >>> result = df.select(dfn.functions.exp("a").alias("exp"))
         >>> result.collect_column("exp")[0].as_py()
         1.0
     """
-    return Expr(f.exp(arg.expr))
+    return Expr(f.exp(_to_raw_expr(arg)))
 
 
-def factorial(arg: Expr) -> Expr:
+def factorial(arg: Expr | str) -> Expr:
     """Returns the factorial of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [3]})
-        >>> result = df.select(
-        ...     dfn.functions.factorial(dfn.col("a")).alias("factorial")
-        ... )
+        >>> result = df.select(dfn.functions.factorial("a").alias("factorial"))
         >>> result.collect_column("factorial")[0].as_py()
         6
     """
-    return Expr(f.factorial(arg.expr))
+    return Expr(f.factorial(_to_raw_expr(arg)))
 
 
-def find_in_set(string: Expr, string_list: Expr | str) -> Expr:
+def find_in_set(string: Expr | str, string_list: Expr | str) -> Expr:
     """Find a string in a list of strings.
 
     Returns a value in the range of 1 to N if the string is in the string list
@@ -1289,44 +1275,41 @@ def find_in_set(string: Expr, string_list: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["b"]})
-        >>> result = df.select(
-        ...     dfn.functions.find_in_set(dfn.col("a"), "a,b,c").alias("pos"))
+        >>> result = df.select(dfn.functions.find_in_set("a", "a,b,c").alias("pos"))
         >>> result.collect_column("pos")[0].as_py()
         2
     """
     string_list = coerce_to_expr(string_list)
-    return Expr(f.find_in_set(string.expr, string_list.expr))
+    return Expr(f.find_in_set(_to_raw_expr(string), string_list.expr))
 
 
-def floor(arg: Expr) -> Expr:
+def floor(arg: Expr | str) -> Expr:
     """Returns the nearest integer less than or equal to the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.9]})
-        >>> floor_df = df.select(dfn.functions.floor(dfn.col("a")).alias("floor"))
+        >>> floor_df = df.select(dfn.functions.floor("a").alias("floor"))
         >>> floor_df.collect_column("floor")[0].as_py()
         1.0
     """
-    return Expr(f.floor(arg.expr))
+    return Expr(f.floor(_to_raw_expr(arg)))
 
 
-def gcd(x: Expr, y: Expr) -> Expr:
+def gcd(x: Expr | str, y: Expr | str) -> Expr:
     """Returns the greatest common divisor.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [12], "b": [8]})
-        >>> result = df.select(
-        ...     dfn.functions.gcd(dfn.col("a"), dfn.col("b")).alias("gcd")
-        ... )
+        >>> result = df.select(dfn.functions.gcd("a", "b").alias("gcd"))
         >>> result.collect_column("gcd")[0].as_py()
         4
     """
-    return Expr(f.gcd(x.expr, y.expr))
+    return Expr(f.gcd(_to_raw_expr(x), _to_raw_expr(y)))
 
 
-def greatest(*args: Expr) -> Expr:
+def greatest(*args: Expr | str) -> Expr:
     """Returns the greatest value from a list of expressions.
 
     Returns NULL if all expressions are NULL.
@@ -1334,18 +1317,17 @@ def greatest(*args: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 3], "b": [2, 1]})
-        >>> result = df.select(
-        ...     dfn.functions.greatest(dfn.col("a"), dfn.col("b")).alias("greatest"))
+        >>> result = df.select(dfn.functions.greatest("a", "b").alias("greatest"))
         >>> result.collect_column("greatest")[0].as_py()
         2
         >>> result.collect_column("greatest")[1].as_py()
         3
     """
-    exprs = [arg.expr for arg in args]
+    exprs = _to_raw_expr_list(args)
     return Expr(f.greatest(*exprs))
 
 
-def ifnull(x: Expr, y: Expr) -> Expr:
+def ifnull(x: Expr | str, y: Expr | str) -> Expr:
     """Returns ``x`` if ``x`` is not NULL. Otherwise returns ``y``.
 
     Args:
@@ -1358,7 +1340,7 @@ def ifnull(x: Expr, y: Expr) -> Expr:
     return nvl(x, y)
 
 
-def initcap(string: Expr) -> Expr:
+def initcap(string: Expr | str) -> Expr:
     """Set the initial letter of each word to capital.
 
     Converts the first letter of each word in ``string`` to uppercase and the remaining
@@ -1367,14 +1349,14 @@ def initcap(string: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["the cat"]})
-        >>> cap_df = df.select(dfn.functions.initcap(dfn.col("a")).alias("cap"))
+        >>> cap_df = df.select(dfn.functions.initcap("a").alias("cap"))
         >>> cap_df.collect_column("cap")[0].as_py()
         'The Cat'
     """
-    return Expr(f.initcap(string.expr))
+    return Expr(f.initcap(_to_raw_expr(string)))
 
 
-def instr(string: Expr, substring: Expr | str) -> Expr:
+def instr(string: Expr | str, substring: Expr | str) -> Expr:
     """Finds the position from where the ``substring`` matches the ``string``.
 
     See Also:
@@ -1383,35 +1365,33 @@ def instr(string: Expr, substring: Expr | str) -> Expr:
     return strpos(string, substring)
 
 
-def iszero(arg: Expr) -> Expr:
+def iszero(arg: Expr | str) -> Expr:
     """Returns true if a given number is +0.0 or -0.0 otherwise returns false.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0, 1.0]})
-        >>> result = df.select(dfn.functions.iszero(dfn.col("a")).alias("iz"))
+        >>> result = df.select(dfn.functions.iszero("a").alias("iz"))
         >>> result.collect_column("iz")[0].as_py()
         True
     """
-    return Expr(f.iszero(arg.expr))
+    return Expr(f.iszero(_to_raw_expr(arg)))
 
 
-def lcm(x: Expr, y: Expr) -> Expr:
+def lcm(x: Expr | str, y: Expr | str) -> Expr:
     """Returns the least common multiple.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [4], "b": [6]})
-        >>> result = df.select(
-        ...     dfn.functions.lcm(dfn.col("a"), dfn.col("b")).alias("lcm")
-        ... )
+        >>> result = df.select(dfn.functions.lcm("a", "b").alias("lcm"))
         >>> result.collect_column("lcm")[0].as_py()
         12
     """
-    return Expr(f.lcm(x.expr, y.expr))
+    return Expr(f.lcm(_to_raw_expr(x), _to_raw_expr(y)))
 
 
-def least(*args: Expr) -> Expr:
+def least(*args: Expr | str) -> Expr:
     """Returns the least value from a list of expressions.
 
     Returns NULL if all expressions are NULL.
@@ -1419,116 +1399,113 @@ def least(*args: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 3], "b": [2, 1]})
-        >>> result = df.select(
-        ...     dfn.functions.least(dfn.col("a"), dfn.col("b")).alias("least"))
+        >>> result = df.select(dfn.functions.least("a", "b").alias("least"))
         >>> result.collect_column("least")[0].as_py()
         1
         >>> result.collect_column("least")[1].as_py()
         1
     """
-    exprs = [arg.expr for arg in args]
+    exprs = _to_raw_expr_list(args)
     return Expr(f.least(*exprs))
 
 
-def left(string: Expr, n: Expr | int) -> Expr:
+def left(string: Expr | str, n: Expr | int) -> Expr:
     """Returns the first ``n`` characters in the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["the cat"]})
-        >>> left_df = df.select(
-        ...     dfn.functions.left(dfn.col("a"), 3).alias("left"))
+        >>> left_df = df.select(dfn.functions.left("a", 3).alias("left"))
         >>> left_df.collect_column("left")[0].as_py()
         'the'
     """
     n = coerce_to_expr(n)
-    return Expr(f.left(string.expr, n.expr))
+    return Expr(f.left(_to_raw_expr(string), n.expr))
 
 
-def levenshtein(string1: Expr, string2: Expr | str) -> Expr:
+def levenshtein(string1: Expr | str, string2: Expr | str) -> Expr:
     """Returns the Levenshtein distance between the two given strings.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["kitten"]})
-        >>> result = df.select(
-        ...     dfn.functions.levenshtein(dfn.col("a"), "sitting").alias("d"))
+        >>> result = df.select(dfn.functions.levenshtein("a", "sitting").alias("d"))
         >>> result.collect_column("d")[0].as_py()
         3
     """
     string2 = coerce_to_expr(string2)
-    return Expr(f.levenshtein(string1.expr, string2.expr))
+    return Expr(f.levenshtein(_to_raw_expr(string1), string2.expr))
 
 
-def ln(arg: Expr) -> Expr:
+def ln(arg: Expr | str) -> Expr:
     """Returns the natural logarithm (base e) of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0]})
-        >>> result = df.select(dfn.functions.ln(dfn.col("a")).alias("ln"))
+        >>> result = df.select(dfn.functions.ln("a").alias("ln"))
         >>> result.collect_column("ln")[0].as_py()
         0.0
     """
-    return Expr(f.ln(arg.expr))
+    return Expr(f.ln(_to_raw_expr(arg)))
 
 
-def log(base: Expr | int | float, num: Expr) -> Expr:  # noqa: PYI041
+def log(base: Expr | int | float, num: Expr | str) -> Expr:  # noqa: PYI041
     """Returns the logarithm of a number for a particular ``base``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [100.0]})
-        >>> result = df.select(
-        ...     dfn.functions.log(10.0, dfn.col("a")).alias("log")
-        ... )
+        >>> result = df.select(dfn.functions.log(10.0, "a").alias("log"))
         >>> result.collect_column("log")[0].as_py()
         2.0
     """
     base = coerce_to_expr(base)
-    return Expr(f.log(base.expr, num.expr))
+    return Expr(f.log(base.expr, _to_raw_expr(num)))
 
 
-def log10(arg: Expr) -> Expr:
+def log10(arg: Expr | str) -> Expr:
     """Base 10 logarithm of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [100.0]})
-        >>> result = df.select(dfn.functions.log10(dfn.col("a")).alias("log10"))
+        >>> result = df.select(dfn.functions.log10("a").alias("log10"))
         >>> result.collect_column("log10")[0].as_py()
         2.0
     """
-    return Expr(f.log10(arg.expr))
+    return Expr(f.log10(_to_raw_expr(arg)))
 
 
-def log2(arg: Expr) -> Expr:
+def log2(arg: Expr | str) -> Expr:
     """Base 2 logarithm of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [8.0]})
-        >>> result = df.select(dfn.functions.log2(dfn.col("a")).alias("log2"))
+        >>> result = df.select(dfn.functions.log2("a").alias("log2"))
         >>> result.collect_column("log2")[0].as_py()
         3.0
     """
-    return Expr(f.log2(arg.expr))
+    return Expr(f.log2(_to_raw_expr(arg)))
 
 
-def lower(arg: Expr) -> Expr:
+def lower(arg: Expr | str) -> Expr:
     """Converts a string to lowercase.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["THE CaT"]})
-        >>> lower_df = df.select(dfn.functions.lower(dfn.col("a")).alias("lower"))
+        >>> lower_df = df.select(dfn.functions.lower("a").alias("lower"))
         >>> lower_df.collect_column("lower")[0].as_py()
         'the cat'
     """
-    return Expr(f.lower(arg.expr))
+    return Expr(f.lower(_to_raw_expr(arg)))
 
 
-def lpad(string: Expr, count: Expr | int, characters: Expr | str | None = None) -> Expr:
+def lpad(
+    string: Expr | str, count: Expr | int, characters: Expr | str | None = None
+) -> Expr:
     """Add left padding to a string.
 
     Extends the string to length length by prepending the characters fill (a
@@ -1538,8 +1515,7 @@ def lpad(string: Expr, count: Expr | int, characters: Expr | str | None = None) 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["the cat", "a hat"]})
-        >>> lpad_df = df.select(
-        ...     dfn.functions.lpad(dfn.col("a"), 6).alias("lpad"))
+        >>> lpad_df = df.select(dfn.functions.lpad("a", 6).alias("lpad"))
         >>> lpad_df.collect_column("lpad")[0].as_py()
         'the ca'
         >>> lpad_df.collect_column("lpad")[1].as_py()
@@ -1547,43 +1523,43 @@ def lpad(string: Expr, count: Expr | int, characters: Expr | str | None = None) 
 
         >>> result = df.select(
         ...     dfn.functions.lpad(
-        ...         dfn.col("a"), 10, characters="."
+        ...         "a", 10, characters="."
         ...     ).alias("lpad"))
         >>> result.collect_column("lpad")[0].as_py()
         '...the cat'
     """
     count = coerce_to_expr(count)
     characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.lpad(string.expr, count.expr, characters.expr))
+    return Expr(f.lpad(_to_raw_expr(string), count.expr, characters.expr))
 
 
-def ltrim(arg: Expr) -> Expr:
+def ltrim(arg: Expr | str) -> Expr:
     """Removes all characters, spaces by default, from the beginning of a string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [" a  "]})
-        >>> trim_df = df.select(dfn.functions.ltrim(dfn.col("a")).alias("trimmed"))
+        >>> trim_df = df.select(dfn.functions.ltrim("a").alias("trimmed"))
         >>> trim_df.collect_column("trimmed")[0].as_py()
         'a  '
     """
-    return Expr(f.ltrim(arg.expr))
+    return Expr(f.ltrim(_to_raw_expr(arg)))
 
 
-def md5(arg: Expr) -> Expr:
+def md5(arg: Expr | str) -> Expr:
     """Computes an MD5 128-bit checksum for a string expression.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.md5(dfn.col("a")).alias("md5"))
+        >>> result = df.select(dfn.functions.md5("a").alias("md5"))
         >>> result.collect_column("md5")[0].as_py()
         '5d41402abc4b2a76b9719d911017c592'
     """
-    return Expr(f.md5(arg.expr))
+    return Expr(f.md5(_to_raw_expr(arg)))
 
 
-def nanvl(x: Expr, y: Expr) -> Expr:
+def nanvl(x: Expr | str, y: Expr | str) -> Expr:
     """Returns ``x`` if ``x`` is not ``NaN``. Otherwise returns ``y``.
 
     Args:
@@ -1593,17 +1569,16 @@ def nanvl(x: Expr, y: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [np.nan, 1.0], "b": [0.0, 0.0]})
-        >>> nanvl_df = df.select(
-        ...     dfn.functions.nanvl(dfn.col("a"), dfn.col("b")).alias("nanvl"))
+        >>> nanvl_df = df.select(dfn.functions.nanvl("a", "b").alias("nanvl"))
         >>> nanvl_df.collect_column("nanvl")[0].as_py()
         0.0
         >>> nanvl_df.collect_column("nanvl")[1].as_py()
         1.0
     """
-    return Expr(f.nanvl(x.expr, y.expr))
+    return Expr(f.nanvl(_to_raw_expr(x), _to_raw_expr(y)))
 
 
-def nvl(x: Expr, y: Expr) -> Expr:
+def nvl(x: Expr | str, y: Expr | str) -> Expr:
     """Returns ``x`` if ``x`` is not ``NULL``. Otherwise returns ``y``.
 
     Args:
@@ -1613,18 +1588,16 @@ def nvl(x: Expr, y: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [None, 1], "b": [0, 0]})
-        >>> nvl_df = df.select(
-        ...     dfn.functions.nvl(dfn.col("a"), dfn.col("b")).alias("nvl")
-        ... )
+        >>> nvl_df = df.select(dfn.functions.nvl("a", "b").alias("nvl"))
         >>> nvl_df.collect_column("nvl")[0].as_py()
         0
         >>> nvl_df.collect_column("nvl")[1].as_py()
         1
     """
-    return Expr(f.nvl(x.expr, y.expr))
+    return Expr(f.nvl(_to_raw_expr(x), _to_raw_expr(y)))
 
 
-def nvl2(x: Expr, y: Expr, z: Expr) -> Expr:
+def nvl2(x: Expr | str, y: Expr | str, z: Expr | str) -> Expr:
     """Returns ``y`` if ``x`` is not NULL. Otherwise returns ``z``.
 
     Args:
@@ -1635,33 +1608,30 @@ def nvl2(x: Expr, y: Expr, z: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [None, 1], "b": [10, 20], "c": [30, 40]})
-        >>> result = df.select(
-        ...     dfn.functions.nvl2(
-        ...         dfn.col("a"), dfn.col("b"), dfn.col("c")).alias("nvl2")
-        ... )
+        >>> result = df.select(dfn.functions.nvl2("a", "b", "c").alias("nvl2"))
         >>> result.collect_column("nvl2")[0].as_py()
         30
         >>> result.collect_column("nvl2")[1].as_py()
         20
     """
-    return Expr(f.nvl2(x.expr, y.expr, z.expr))
+    return Expr(f.nvl2(_to_raw_expr(x), _to_raw_expr(y), _to_raw_expr(z)))
 
 
-def octet_length(arg: Expr) -> Expr:
+def octet_length(arg: Expr | str) -> Expr:
     """Returns the number of bytes of a string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.octet_length(dfn.col("a")).alias("len"))
+        >>> result = df.select(dfn.functions.octet_length("a").alias("len"))
         >>> result.collect_column("len")[0].as_py()
         5
     """
-    return Expr(f.octet_length(arg.expr))
+    return Expr(f.octet_length(_to_raw_expr(arg)))
 
 
 def overlay(
-    string: Expr,
+    string: Expr | str,
     substring: Expr | str,
     start: Expr | int,
     length: Expr | int | None = None,
@@ -1674,17 +1644,18 @@ def overlay(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["abcdef"]})
-        >>> result = df.select(
-        ...     dfn.functions.overlay(dfn.col("a"), "XY", 3, 2).alias("o"))
+        >>> result = df.select(dfn.functions.overlay("a", "XY", 3, 2).alias("o"))
         >>> result.collect_column("o")[0].as_py()
         'abXYef'
     """
     substring = coerce_to_expr(substring)
     start = coerce_to_expr(start)
     if length is None:
-        return Expr(f.overlay(string.expr, substring.expr, start.expr))
+        return Expr(f.overlay(_to_raw_expr(string), substring.expr, start.expr))
     length = coerce_to_expr(length)
-    return Expr(f.overlay(string.expr, substring.expr, start.expr, length.expr))
+    return Expr(
+        f.overlay(_to_raw_expr(string), substring.expr, start.expr, length.expr)
+    )
 
 
 def pi() -> Expr:
@@ -1703,7 +1674,7 @@ def pi() -> Expr:
     return Expr(f.pi())
 
 
-def position(string: Expr, substring: Expr | str) -> Expr:
+def position(string: Expr | str, substring: Expr | str) -> Expr:
     """Finds the position from where the ``substring`` matches the ``string``.
 
     See Also:
@@ -1712,23 +1683,21 @@ def position(string: Expr, substring: Expr | str) -> Expr:
     return strpos(string, substring)
 
 
-def power(base: Expr, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
+def power(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
     """Returns ``base`` raised to the power of ``exponent``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [2.0]})
-        >>> result = df.select(
-        ...     dfn.functions.power(dfn.col("a"), 3.0).alias("pow")
-        ... )
+        >>> result = df.select(dfn.functions.power("a", 3.0).alias("pow"))
         >>> result.collect_column("pow")[0].as_py()
         8.0
     """
     exponent = coerce_to_expr(exponent)
-    return Expr(f.power(base.expr, exponent.expr))
+    return Expr(f.power(_to_raw_expr(base), exponent.expr))
 
 
-def pow(base: Expr, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
+def pow(base: Expr | str, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
     """Returns ``base`` raised to the power of ``exponent``.
 
     See Also:
@@ -1737,24 +1706,22 @@ def pow(base: Expr, exponent: Expr | int | float) -> Expr:  # noqa: PYI041
     return power(base, exponent)
 
 
-def radians(arg: Expr) -> Expr:
+def radians(arg: Expr | str) -> Expr:
     """Converts the argument from degrees to radians.
 
     Examples:
         >>> from math import pi
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [180.0]})
-        >>> result = df.select(
-        ...     dfn.functions.radians(dfn.col("a")).alias("rad")
-        ... )
+        >>> result = df.select(dfn.functions.radians("a").alias("rad"))
         >>> result.collect_column("rad")[0].as_py() == pi
         True
     """
-    return Expr(f.radians(arg.expr))
+    return Expr(f.radians(_to_raw_expr(arg)))
 
 
 def regexp_like(
-    string: Expr, regex: Expr | str, flags: Expr | str | None = None
+    string: Expr | str, regex: Expr | str, flags: Expr | str | None = None
 ) -> Expr:
     r"""Find if any regular expression (regex) matches exist.
 
@@ -1765,7 +1732,7 @@ def regexp_like(
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello123"]})
         >>> result = df.select(
-        ...     dfn.functions.regexp_like(dfn.col("a"), "\\d+").alias("m")
+        ...     dfn.functions.regexp_like("a", "\\d+").alias("m")
         ... )
         >>> result.collect_column("m")[0].as_py()
         True
@@ -1774,7 +1741,7 @@ def regexp_like(
 
         >>> result = df.select(
         ...     dfn.functions.regexp_like(
-        ...         dfn.col("a"), "HELLO", flags="i",
+        ...         "a", "HELLO", flags="i",
         ...     ).alias("m")
         ... )
         >>> result.collect_column("m")[0].as_py()
@@ -1784,13 +1751,13 @@ def regexp_like(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_like(
-            string.expr, regex.expr, flags.expr if flags is not None else None
+            _to_raw_expr(string), regex.expr, flags.expr if flags is not None else None
         )
     )
 
 
 def regexp_match(
-    string: Expr, regex: Expr | str, flags: Expr | str | None = None
+    string: Expr | str, regex: Expr | str, flags: Expr | str | None = None
 ) -> Expr:
     r"""Perform regular expression (regex) matching.
 
@@ -1801,7 +1768,7 @@ def regexp_match(
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello 42 world"]})
         >>> result = df.select(
-        ...     dfn.functions.regexp_match(dfn.col("a"), "(\\d+)").alias("m")
+        ...     dfn.functions.regexp_match("a", "(\\d+)").alias("m")
         ... )
         >>> result.collect_column("m")[0].as_py()
         ['42']
@@ -1810,7 +1777,7 @@ def regexp_match(
 
         >>> result = df.select(
         ...     dfn.functions.regexp_match(
-        ...         dfn.col("a"), "(HELLO)", flags="i",
+        ...         "a", "(HELLO)", flags="i",
         ...     ).alias("m")
         ... )
         >>> result.collect_column("m")[0].as_py()
@@ -1820,13 +1787,13 @@ def regexp_match(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_match(
-            string.expr, regex.expr, flags.expr if flags is not None else None
+            _to_raw_expr(string), regex.expr, flags.expr if flags is not None else None
         )
     )
 
 
 def regexp_replace(
-    string: Expr,
+    string: Expr | str,
     pattern: Expr | str,
     replacement: Expr | str,
     flags: Expr | str | None = None,
@@ -1844,7 +1811,7 @@ def regexp_replace(
         >>> df = ctx.from_pydict({"a": ["hello 42"]})
         >>> result = df.select(
         ...     dfn.functions.regexp_replace(
-        ...         dfn.col("a"), "\\d+", "XX"
+        ...         "a", "\\d+", "XX"
         ...     ).alias("r")
         ... )
         >>> result.collect_column("r")[0].as_py()
@@ -1855,7 +1822,7 @@ def regexp_replace(
         >>> df = ctx.from_pydict({"a": ["a1 b2 c3"]})
         >>> result = df.select(
         ...     dfn.functions.regexp_replace(
-        ...         dfn.col("a"), "\\d+", "X", flags="g",
+        ...         "a", "\\d+", "X", flags="g",
         ...     ).alias("r")
         ... )
         >>> result.collect_column("r")[0].as_py()
@@ -1866,7 +1833,7 @@ def regexp_replace(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_replace(
-            string.expr,
+            _to_raw_expr(string),
             pattern.expr,
             replacement.expr,
             flags.expr if flags is not None else None,
@@ -1875,7 +1842,7 @@ def regexp_replace(
 
 
 def regexp_count(
-    string: Expr,
+    string: Expr | str,
     pattern: Expr | str,
     start: Expr | int | None = None,
     flags: Expr | str | None = None,
@@ -1888,8 +1855,7 @@ def regexp_count(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["abcabc"]})
-        >>> result = df.select(
-        ...     dfn.functions.regexp_count(dfn.col("a"), "abc").alias("c"))
+        >>> result = df.select(dfn.functions.regexp_count("a", "abc").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         2
 
@@ -1898,7 +1864,7 @@ def regexp_count(
 
         >>> result = df.select(
         ...     dfn.functions.regexp_count(
-        ...         dfn.col("a"), "ABC", start=4, flags="i",
+        ...         "a", "ABC", start=4, flags="i",
         ...     ).alias("c"))
         >>> result.collect_column("c")[0].as_py()
         1
@@ -1908,7 +1874,7 @@ def regexp_count(
     flags = coerce_to_expr_or_none(flags)
     return Expr(
         f.regexp_count(
-            string.expr,
+            _to_raw_expr(string),
             pattern.expr,
             start.expr if start is not None else None,
             flags.expr if flags is not None else None,
@@ -1917,7 +1883,7 @@ def regexp_count(
 
 
 def regexp_instr(
-    values: Expr,
+    values: Expr | str,
     regex: Expr | str,
     start: Expr | int | None = None,
     n: Expr | int | None = None,
@@ -1938,7 +1904,7 @@ def regexp_instr(
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello 42 world"]})
         >>> result = df.select(
-        ...     dfn.functions.regexp_instr(dfn.col("a"), "\\d+").alias("pos")
+        ...     dfn.functions.regexp_instr("a", "\\d+").alias("pos")
         ... )
         >>> result.collect_column("pos")[0].as_py()
         7
@@ -1949,7 +1915,7 @@ def regexp_instr(
         >>> df = ctx.from_pydict({"a": ["abc ABC abc"]})
         >>> result = df.select(
         ...     dfn.functions.regexp_instr(
-        ...         dfn.col("a"), "abc",
+        ...         "a", "abc",
         ...         start=2, n=1, flags="i",
         ...     ).alias("pos")
         ... )
@@ -1960,7 +1926,7 @@ def regexp_instr(
 
         >>> result = df.select(
         ...     dfn.functions.regexp_instr(
-        ...         dfn.col("a"), "(abc)", sub_expr=1,
+        ...         "a", "(abc)", sub_expr=1,
         ...     ).alias("pos")
         ... )
         >>> result.collect_column("pos")[0].as_py()
@@ -1974,7 +1940,7 @@ def regexp_instr(
 
     return Expr(
         f.regexp_instr(
-            values.expr,
+            _to_raw_expr(values),
             regex.expr,
             start.expr if start is not None else None,
             n.expr if n is not None else None,
@@ -1984,65 +1950,63 @@ def regexp_instr(
     )
 
 
-def repeat(string: Expr, n: Expr | int) -> Expr:
+def repeat(string: Expr | str, n: Expr | int) -> Expr:
     """Repeats the ``string`` to ``n`` times.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["ha"]})
-        >>> result = df.select(
-        ...     dfn.functions.repeat(dfn.col("a"), 3).alias("r"))
+        >>> result = df.select(dfn.functions.repeat("a", 3).alias("r"))
         >>> result.collect_column("r")[0].as_py()
         'hahaha'
     """
     n = coerce_to_expr(n)
-    return Expr(f.repeat(string.expr, n.expr))
+    return Expr(f.repeat(_to_raw_expr(string), n.expr))
 
 
-def replace(string: Expr, from_val: Expr | str, to_val: Expr | str) -> Expr:
+def replace(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Expr:
     """Replaces all occurrences of ``from_val`` with ``to_val`` in the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello world"]})
-        >>> result = df.select(
-        ...     dfn.functions.replace(dfn.col("a"), "world", "there").alias("r"))
+        >>> result = df.select(dfn.functions.replace("a", "world", "there").alias("r"))
         >>> result.collect_column("r")[0].as_py()
         'hello there'
     """
     from_val = coerce_to_expr(from_val)
     to_val = coerce_to_expr(to_val)
-    return Expr(f.replace(string.expr, from_val.expr, to_val.expr))
+    return Expr(f.replace(_to_raw_expr(string), from_val.expr, to_val.expr))
 
 
-def reverse(arg: Expr) -> Expr:
+def reverse(arg: Expr | str) -> Expr:
     """Reverse the string argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.reverse(dfn.col("a")).alias("r"))
+        >>> result = df.select(dfn.functions.reverse("a").alias("r"))
         >>> result.collect_column("r")[0].as_py()
         'olleh'
     """
-    return Expr(f.reverse(arg.expr))
+    return Expr(f.reverse(_to_raw_expr(arg)))
 
 
-def right(string: Expr, n: Expr | int) -> Expr:
+def right(string: Expr | str, n: Expr | int) -> Expr:
     """Returns the last ``n`` characters in the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.right(dfn.col("a"), 3).alias("r"))
+        >>> result = df.select(dfn.functions.right("a", 3).alias("r"))
         >>> result.collect_column("r")[0].as_py()
         'llo'
     """
     n = coerce_to_expr(n)
-    return Expr(f.right(string.expr, n.expr))
+    return Expr(f.right(_to_raw_expr(string), n.expr))
 
 
-def round(value: Expr, decimal_places: Expr | int | None = None) -> Expr:
+def round(value: Expr | str, decimal_places: Expr | int | None = None) -> Expr:
     """Round the argument to the nearest integer.
 
     If the optional ``decimal_places`` is specified, round to the nearest number of
@@ -2052,15 +2016,17 @@ def round(value: Expr, decimal_places: Expr | int | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.567]})
-        >>> result = df.select(dfn.functions.round(dfn.col("a"), 2).alias("r"))
+        >>> result = df.select(dfn.functions.round("a", 2).alias("r"))
         >>> result.collect_column("r")[0].as_py()
         1.57
     """
     decimal_places = coerce_to_expr(decimal_places if decimal_places is not None else 0)
-    return Expr(f.round(value.expr, decimal_places.expr))
+    return Expr(f.round(_to_raw_expr(value), decimal_places.expr))
 
 
-def rpad(string: Expr, count: Expr | int, characters: Expr | str | None = None) -> Expr:
+def rpad(
+    string: Expr | str, count: Expr | int, characters: Expr | str | None = None
+) -> Expr:
     """Add right padding to a string.
 
     Extends the string to length length by appending the characters fill (a space
@@ -2069,129 +2035,120 @@ def rpad(string: Expr, count: Expr | int, characters: Expr | str | None = None) 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hi"]})
-        >>> result = df.select(
-        ...     dfn.functions.rpad(dfn.col("a"), 5, "!").alias("r"))
+        >>> result = df.select(dfn.functions.rpad("a", 5, "!").alias("r"))
         >>> result.collect_column("r")[0].as_py()
         'hi!!!'
     """
     count = coerce_to_expr(count)
     characters = coerce_to_expr(characters if characters is not None else " ")
-    return Expr(f.rpad(string.expr, count.expr, characters.expr))
+    return Expr(f.rpad(_to_raw_expr(string), count.expr, characters.expr))
 
 
-def rtrim(arg: Expr) -> Expr:
+def rtrim(arg: Expr | str) -> Expr:
     """Removes all characters, spaces by default, from the end of a string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [" a  "]})
-        >>> trim_df = df.select(dfn.functions.rtrim(dfn.col("a")).alias("trimmed"))
+        >>> trim_df = df.select(dfn.functions.rtrim("a").alias("trimmed"))
         >>> trim_df.collect_column("trimmed")[0].as_py()
         ' a'
     """
-    return Expr(f.rtrim(arg.expr))
+    return Expr(f.rtrim(_to_raw_expr(arg)))
 
 
-def sha224(arg: Expr) -> Expr:
+def sha224(arg: Expr | str) -> Expr:
     """Computes the SHA-224 hash of a binary string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.sha224(dfn.col("a")).alias("h")
-        ... )
+        >>> result = df.select(dfn.functions.sha224("a").alias("h"))
         >>> result.collect_column("h")[0].as_py().hex()
         'ea09ae9cc6768c50fcee903ed054556e5bfc8347907f12598aa24193'
     """
-    return Expr(f.sha224(arg.expr))
+    return Expr(f.sha224(_to_raw_expr(arg)))
 
 
-def sha256(arg: Expr) -> Expr:
+def sha256(arg: Expr | str) -> Expr:
     """Computes the SHA-256 hash of a binary string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.sha256(dfn.col("a")).alias("h")
-        ... )
+        >>> result = df.select(dfn.functions.sha256("a").alias("h"))
         >>> result.collect_column("h")[0].as_py().hex()
         '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
     """
-    return Expr(f.sha256(arg.expr))
+    return Expr(f.sha256(_to_raw_expr(arg)))
 
 
-def sha384(arg: Expr) -> Expr:
+def sha384(arg: Expr | str) -> Expr:
     """Computes the SHA-384 hash of a binary string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.sha384(dfn.col("a")).alias("h")
-        ... )
+        >>> result = df.select(dfn.functions.sha384("a").alias("h"))
         >>> result.collect_column("h")[0].as_py().hex()
         '59e1748777448c69de6b800d7a33bbfb9ff1b...
     """
-    return Expr(f.sha384(arg.expr))
+    return Expr(f.sha384(_to_raw_expr(arg)))
 
 
-def sha512(arg: Expr) -> Expr:
+def sha512(arg: Expr | str) -> Expr:
     """Computes the SHA-512 hash of a binary string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.sha512(dfn.col("a")).alias("h")
-        ... )
+        >>> result = df.select(dfn.functions.sha512("a").alias("h"))
         >>> result.collect_column("h")[0].as_py().hex()
         '9b71d224bd62f3785d96d46ad3ea3d73319bfb...
     """
-    return Expr(f.sha512(arg.expr))
+    return Expr(f.sha512(_to_raw_expr(arg)))
 
 
-def signum(arg: Expr) -> Expr:
+def signum(arg: Expr | str) -> Expr:
     """Returns the sign of the argument (-1, 0, +1).
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [-5.0, 0.0, 5.0]})
-        >>> result = df.select(dfn.functions.signum(dfn.col("a")).alias("s"))
+        >>> result = df.select(dfn.functions.signum("a").alias("s"))
         >>> result.collect_column("s").to_pylist()
         [-1.0, 0.0, 1.0]
     """
-    return Expr(f.signum(arg.expr))
+    return Expr(f.signum(_to_raw_expr(arg)))
 
 
-def sin(arg: Expr) -> Expr:
+def sin(arg: Expr | str) -> Expr:
     """Returns the sine of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.sin(dfn.col("a")).alias("sin"))
+        >>> result = df.select(dfn.functions.sin("a").alias("sin"))
         >>> result.collect_column("sin")[0].as_py()
         0.0
     """
-    return Expr(f.sin(arg.expr))
+    return Expr(f.sin(_to_raw_expr(arg)))
 
 
-def sinh(arg: Expr) -> Expr:
+def sinh(arg: Expr | str) -> Expr:
     """Returns the hyperbolic sine of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.sinh(dfn.col("a")).alias("sinh"))
+        >>> result = df.select(dfn.functions.sinh("a").alias("sinh"))
         >>> result.collect_column("sinh")[0].as_py()
         0.0
     """
-    return Expr(f.sinh(arg.expr))
+    return Expr(f.sinh(_to_raw_expr(arg)))
 
 
-def split_part(string: Expr, delimiter: Expr | str, index: Expr | int) -> Expr:
+def split_part(string: Expr | str, delimiter: Expr | str, index: Expr | int) -> Expr:
     """Split a string and return one part.
 
     Splits a string based on a delimiter and picks out the desired field based
@@ -2200,75 +2157,71 @@ def split_part(string: Expr, delimiter: Expr | str, index: Expr | int) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["a,b,c"]})
-        >>> result = df.select(
-        ...     dfn.functions.split_part(dfn.col("a"), ",", 2).alias("s"))
+        >>> result = df.select(dfn.functions.split_part("a", ",", 2).alias("s"))
         >>> result.collect_column("s")[0].as_py()
         'b'
     """
     delimiter = coerce_to_expr(delimiter)
     index = coerce_to_expr(index)
-    return Expr(f.split_part(string.expr, delimiter.expr, index.expr))
+    return Expr(f.split_part(_to_raw_expr(string), delimiter.expr, index.expr))
 
 
-def sqrt(arg: Expr) -> Expr:
+def sqrt(arg: Expr | str) -> Expr:
     """Returns the square root of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [9.0]})
-        >>> result = df.select(dfn.functions.sqrt(dfn.col("a")).alias("sqrt"))
+        >>> result = df.select(dfn.functions.sqrt("a").alias("sqrt"))
         >>> result.collect_column("sqrt")[0].as_py()
         3.0
     """
-    return Expr(f.sqrt(arg.expr))
+    return Expr(f.sqrt(_to_raw_expr(arg)))
 
 
-def starts_with(string: Expr, prefix: Expr | str) -> Expr:
+def starts_with(string: Expr | str, prefix: Expr | str) -> Expr:
     """Returns true if string starts with prefix.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello_from_datafusion"]})
-        >>> result = df.select(
-        ...     dfn.functions.starts_with(dfn.col("a"), "hello").alias("sw"))
+        >>> result = df.select(dfn.functions.starts_with("a", "hello").alias("sw"))
         >>> result.collect_column("sw")[0].as_py()
         True
     """
     prefix = coerce_to_expr(prefix)
-    return Expr(f.starts_with(string.expr, prefix.expr))
+    return Expr(f.starts_with(_to_raw_expr(string), prefix.expr))
 
 
-def strpos(string: Expr, substring: Expr | str) -> Expr:
+def strpos(string: Expr | str, substring: Expr | str) -> Expr:
     """Finds the position from where the ``substring`` matches the ``string``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.strpos(dfn.col("a"), "llo").alias("pos"))
+        >>> result = df.select(dfn.functions.strpos("a", "llo").alias("pos"))
         >>> result.collect_column("pos")[0].as_py()
         3
     """
     substring = coerce_to_expr(substring)
-    return Expr(f.strpos(string.expr, substring.expr))
+    return Expr(f.strpos(_to_raw_expr(string), substring.expr))
 
 
-def substr(string: Expr, position: Expr | int) -> Expr:
+def substr(string: Expr | str, position: Expr | int) -> Expr:
     """Substring from the ``position`` to the end.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.substr(dfn.col("a"), 3).alias("s"))
+        >>> result = df.select(dfn.functions.substr("a", 3).alias("s"))
         >>> result.collect_column("s")[0].as_py()
         'llo'
     """
     position = coerce_to_expr(position)
-    return Expr(f.substr(string.expr, position.expr))
+    return Expr(f.substr(_to_raw_expr(string), position.expr))
 
 
-def substr_index(string: Expr, delimiter: Expr | str, count: Expr | int) -> Expr:
+def substr_index(string: Expr | str, delimiter: Expr | str, count: Expr | int) -> Expr:
     """Returns an indexed substring.
 
     The return will be the ``string`` from before ``count`` occurrences of
@@ -2277,69 +2230,67 @@ def substr_index(string: Expr, delimiter: Expr | str, count: Expr | int) -> Expr
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["a.b.c"]})
-        >>> result = df.select(
-        ...     dfn.functions.substr_index(dfn.col("a"), ".", 2).alias("s"))
+        >>> result = df.select(dfn.functions.substr_index("a", ".", 2).alias("s"))
         >>> result.collect_column("s")[0].as_py()
         'a.b'
     """
     delimiter = coerce_to_expr(delimiter)
     count = coerce_to_expr(count)
-    return Expr(f.substr_index(string.expr, delimiter.expr, count.expr))
+    return Expr(f.substr_index(_to_raw_expr(string), delimiter.expr, count.expr))
 
 
-def substring(string: Expr, position: Expr | int, length: Expr | int) -> Expr:
+def substring(string: Expr | str, position: Expr | int, length: Expr | int) -> Expr:
     """Substring from the ``position`` with ``length`` characters.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello world"]})
-        >>> result = df.select(
-        ...     dfn.functions.substring(dfn.col("a"), 1, 5).alias("s"))
+        >>> result = df.select(dfn.functions.substring("a", 1, 5).alias("s"))
         >>> result.collect_column("s")[0].as_py()
         'hello'
     """
     position = coerce_to_expr(position)
     length = coerce_to_expr(length)
-    return Expr(f.substring(string.expr, position.expr, length.expr))
+    return Expr(f.substring(_to_raw_expr(string), position.expr, length.expr))
 
 
-def tan(arg: Expr) -> Expr:
+def tan(arg: Expr | str) -> Expr:
     """Returns the tangent of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.tan(dfn.col("a")).alias("tan"))
+        >>> result = df.select(dfn.functions.tan("a").alias("tan"))
         >>> result.collect_column("tan")[0].as_py()
         0.0
     """
-    return Expr(f.tan(arg.expr))
+    return Expr(f.tan(_to_raw_expr(arg)))
 
 
-def tanh(arg: Expr) -> Expr:
+def tanh(arg: Expr | str) -> Expr:
     """Returns the hyperbolic tangent of the argument.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0]})
-        >>> result = df.select(dfn.functions.tanh(dfn.col("a")).alias("tanh"))
+        >>> result = df.select(dfn.functions.tanh("a").alias("tanh"))
         >>> result.collect_column("tanh")[0].as_py()
         0.0
     """
-    return Expr(f.tanh(arg.expr))
+    return Expr(f.tanh(_to_raw_expr(arg)))
 
 
-def to_hex(arg: Expr) -> Expr:
+def to_hex(arg: Expr | str) -> Expr:
     """Converts an integer to a hexadecimal string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [255]})
-        >>> result = df.select(dfn.functions.to_hex(dfn.col("a")).alias("hex"))
+        >>> result = df.select(dfn.functions.to_hex("a").alias("hex"))
         >>> result.collect_column("hex")[0].as_py()
         'ff'
     """
-    return Expr(f.to_hex(arg.expr))
+    return Expr(f.to_hex(_to_raw_expr(arg)))
 
 
 def now() -> Expr:
@@ -2372,7 +2323,7 @@ def current_timestamp() -> Expr:
     return now()
 
 
-def to_char(arg: Expr, formatter: Expr | str) -> Expr:
+def to_char(arg: Expr | str, formatter: Expr | str) -> Expr:
     """Returns a string representation of a date, time, timestamp or duration.
 
     For usage of ``formatter`` see the rust chrono package ``strftime`` package.
@@ -2392,10 +2343,10 @@ def to_char(arg: Expr, formatter: Expr | str) -> Expr:
         '2021/01/01'
     """
     formatter = coerce_to_expr(formatter)
-    return Expr(f.to_char(arg.expr, formatter.expr))
+    return Expr(f.to_char(_to_raw_expr(arg), formatter.expr))
 
 
-def date_format(arg: Expr, formatter: Expr | str) -> Expr:
+def date_format(arg: Expr | str, formatter: Expr | str) -> Expr:
     """Returns a string representation of a date, time, timestamp or duration.
 
     See Also:
@@ -2404,11 +2355,7 @@ def date_format(arg: Expr, formatter: Expr | str) -> Expr:
     return to_char(arg, formatter)
 
 
-def _unwrap_exprs(args: Iterable[Expr]) -> list:
-    return [arg.expr for arg in args]
-
-
-def to_date(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_date(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a value to a date (YYYY-MM-DD).
 
     Supports strings, numeric and timestamp types as input.
@@ -2423,31 +2370,33 @@ def to_date(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-07-20"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_date(dfn.col("a")).alias("dt"))
+        >>> result = df.select(dfn.functions.to_date("a").alias("dt"))
         >>> str(result.collect_column("dt")[0].as_py())
         '2021-07-20'
 
         Pass a format string as a bare ``str``:
 
         >>> df = ctx.from_pydict({"a": ["20-07-2021"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_date(dfn.col("a"), "%d-%m-%Y").alias("dt"))
+        >>> result = df.select(dfn.functions.to_date("a", "%d-%m-%Y").alias("dt"))
         >>> str(result.collect_column("dt")[0].as_py())
         '2021-07-20'
     """
-    return Expr(f.to_date(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters))))
+    return Expr(
+        f.to_date(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
+    )
 
 
-def to_local_time(*args: Expr) -> Expr:
+def to_local_time(*args: Expr | str) -> Expr:
     """Converts a timestamp with a timezone to a timestamp without a timezone.
 
     This function handles daylight saving time changes.
     """
-    return Expr(f.to_local_time(*_unwrap_exprs(args)))
+    return Expr(f.to_local_time(*_to_raw_expr_list(args)))
 
 
-def to_time(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_time(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a value to a time. Supports strings and timestamps as input.
 
     If ``formatters`` is not provided strings are parsed as HH:MM:SS, HH:MM or
@@ -2460,23 +2409,25 @@ def to_time(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["14:30:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_time(dfn.col("a")).alias("t"))
+        >>> result = df.select(dfn.functions.to_time("a").alias("t"))
         >>> str(result.collect_column("t")[0].as_py())
         '14:30:00'
 
         Pass a format string as a bare ``str``:
 
         >>> df = ctx.from_pydict({"a": ["14h30m00s"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_time(dfn.col("a"), "%Hh%Mm%Ss").alias("t"))
+        >>> result = df.select(dfn.functions.to_time("a", "%Hh%Mm%Ss").alias("t"))
         >>> str(result.collect_column("t")[0].as_py())
         '14:30:00'
     """
-    return Expr(f.to_time(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters))))
+    return Expr(
+        f.to_time(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
+    )
 
 
-def to_timestamp(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_timestamp(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a string and optional formats to a ``Timestamp`` in nanoseconds.
 
     For usage of ``formatters`` see the rust chrono package ``strftime`` package.
@@ -2486,11 +2437,7 @@ def to_timestamp(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-01-01T00:00:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_timestamp(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.to_timestamp("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
 
@@ -2499,18 +2446,20 @@ def to_timestamp(arg: Expr, *formatters: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/2021 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_timestamp(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("ts")
         ... )
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters)))
+        f.to_timestamp(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
     )
 
 
-def to_timestamp_millis(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_timestamp_millis(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a string and optional formats to a ``Timestamp`` in milliseconds.
 
     See :py:func:`to_timestamp` for a description on how to use formatters.
@@ -2518,11 +2467,7 @@ def to_timestamp_millis(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-01-01T00:00:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_timestamp_millis(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.to_timestamp_millis("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
 
@@ -2531,18 +2476,20 @@ def to_timestamp_millis(arg: Expr, *formatters: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/2021 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_timestamp_millis(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("ts")
         ... )
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_millis(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters)))
+        f.to_timestamp_millis(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
     )
 
 
-def to_timestamp_micros(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_timestamp_micros(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a string and optional formats to a ``Timestamp`` in microseconds.
 
     See :py:func:`to_timestamp` for a description on how to use formatters.
@@ -2550,11 +2497,7 @@ def to_timestamp_micros(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-01-01T00:00:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_timestamp_micros(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.to_timestamp_micros("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
 
@@ -2563,18 +2506,20 @@ def to_timestamp_micros(arg: Expr, *formatters: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/2021 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_timestamp_micros(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("ts")
         ... )
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_micros(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters)))
+        f.to_timestamp_micros(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
     )
 
 
-def to_timestamp_nanos(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_timestamp_nanos(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a string and optional formats to a ``Timestamp`` in nanoseconds.
 
     See :py:func:`to_timestamp` for a description on how to use formatters.
@@ -2582,11 +2527,7 @@ def to_timestamp_nanos(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-01-01T00:00:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_timestamp_nanos(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.to_timestamp_nanos("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
 
@@ -2595,18 +2536,20 @@ def to_timestamp_nanos(arg: Expr, *formatters: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/2021 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_timestamp_nanos(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("ts")
         ... )
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
     """
     return Expr(
-        f.to_timestamp_nanos(arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters)))
+        f.to_timestamp_nanos(
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
+        )
     )
 
 
-def to_timestamp_seconds(arg: Expr, *formatters: Expr | str) -> Expr:
+def to_timestamp_seconds(arg: Expr | str, *formatters: Expr | str) -> Expr:
     """Converts a string and optional formats to a ``Timestamp`` in seconds.
 
     See :py:func:`to_timestamp` for a description on how to use formatters.
@@ -2614,11 +2557,7 @@ def to_timestamp_seconds(arg: Expr, *formatters: Expr | str) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-01-01T00:00:00"]})
-        >>> result = df.select(
-        ...     dfn.functions.to_timestamp_seconds(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.to_timestamp_seconds("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '2021-01-01 00:00:00'
 
@@ -2627,7 +2566,7 @@ def to_timestamp_seconds(arg: Expr, *formatters: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/2021 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_timestamp_seconds(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("ts")
         ... )
         >>> str(result.collect_column("ts")[0].as_py())
@@ -2635,18 +2574,18 @@ def to_timestamp_seconds(arg: Expr, *formatters: Expr | str) -> Expr:
     """
     return Expr(
         f.to_timestamp_seconds(
-            arg.expr, *_unwrap_exprs(coerce_to_expr_list(formatters))
+            _to_raw_expr(arg), *_to_raw_expr_list(coerce_to_expr_list(formatters))
         )
     )
 
 
-def to_unixtime(string: Expr, *format_arguments: Expr | str) -> Expr:
+def to_unixtime(string: Expr | str, *format_arguments: Expr | str) -> Expr:
     """Converts a string and optional formats to a Unixtime.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["1970-01-01T00:00:00"]})
-        >>> result = df.select(dfn.functions.to_unixtime(dfn.col("a")).alias("u"))
+        >>> result = df.select(dfn.functions.to_unixtime("a").alias("u"))
         >>> result.collect_column("u")[0].as_py()
         0
 
@@ -2655,7 +2594,7 @@ def to_unixtime(string: Expr, *format_arguments: Expr | str) -> Expr:
         >>> df = ctx.from_pydict({"a": ["01/01/1970 00:00:00"]})
         >>> result = df.select(
         ...     dfn.functions.to_unixtime(
-        ...         dfn.col("a"), "%d/%m/%Y %H:%M:%S"
+        ...         "a", "%d/%m/%Y %H:%M:%S"
         ...     ).alias("u")
         ... )
         >>> result.collect_column("u")[0].as_py()
@@ -2663,7 +2602,8 @@ def to_unixtime(string: Expr, *format_arguments: Expr | str) -> Expr:
     """
     return Expr(
         f.to_unixtime(
-            string.expr, *_unwrap_exprs(coerce_to_expr_list(format_arguments))
+            _to_raw_expr(string),
+            *_to_raw_expr_list(coerce_to_expr_list(format_arguments)),
         )
     )
 
@@ -2705,7 +2645,7 @@ def current_time() -> Expr:
     return Expr(f.current_time())
 
 
-def datepart(part: Expr | str, date: Expr) -> Expr:
+def datepart(part: Expr | str, date: Expr | str) -> Expr:
     """Return a specified part of a date.
 
     See Also:
@@ -2714,7 +2654,7 @@ def datepart(part: Expr | str, date: Expr) -> Expr:
     return _date_part(part, date, "datepart")
 
 
-def date_part(part: Expr | str, date: Expr) -> Expr:
+def date_part(part: Expr | str, date: Expr | str) -> Expr:
     """Extracts a subfield from the date.
 
     Args:
@@ -2725,22 +2665,21 @@ def date_part(part: Expr | str, date: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-07-15T00:00:00"]})
-        >>> df = df.select(dfn.functions.to_timestamp(dfn.col("a")).alias("a"))
-        >>> result = df.select(
-        ...     dfn.functions.date_part("year", dfn.col("a")).alias("y"))
+        >>> df = df.select(dfn.functions.to_timestamp("a").alias("a"))
+        >>> result = df.select(dfn.functions.date_part("year", "a").alias("y"))
         >>> result.collect_column("y")[0].as_py()
         2021
     """
     return _date_part(part, date, "date_part")
 
 
-def _date_part(part: Expr | str, date: Expr, function_name: str) -> Expr:
+def _date_part(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
     part = coerce_to_expr(part)
-    return Expr(f.date_part(part.expr, date.expr))
+    return Expr(f.date_part(part.expr, _to_raw_expr(date)))
 
 
-def extract(part: Expr | str, date: Expr) -> Expr:
+def extract(part: Expr | str, date: Expr | str) -> Expr:
     """Extracts a subfield from the date.
 
     See Also:
@@ -2749,7 +2688,7 @@ def extract(part: Expr | str, date: Expr) -> Expr:
     return _date_part(part, date, "extract")
 
 
-def date_trunc(part: Expr | str, date: Expr) -> Expr:
+def date_trunc(part: Expr | str, date: Expr | str) -> Expr:
     """Truncates the date to a specified level of precision.
 
     Args:
@@ -2760,23 +2699,21 @@ def date_trunc(part: Expr | str, date: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["2021-07-15T12:34:56"]})
-        >>> df = df.select(dfn.functions.to_timestamp(dfn.col("a")).alias("a"))
-        >>> result = df.select(
-        ...     dfn.functions.date_trunc("month", dfn.col("a")).alias("t")
-        ... )
+        >>> df = df.select(dfn.functions.to_timestamp("a").alias("a"))
+        >>> result = df.select(dfn.functions.date_trunc("month", "a").alias("t"))
         >>> str(result.collect_column("t")[0].as_py())
         '2021-07-01 00:00:00'
     """
     return _date_trunc(part, date, "date_trunc")
 
 
-def _date_trunc(part: Expr | str, date: Expr, function_name: str) -> Expr:
+def _date_trunc(part: Expr | str, date: Expr | str, function_name: str) -> Expr:
     _warn_if_expr_for_literal_arg(part, function_name, "part")
     part = coerce_to_expr(part)
-    return Expr(f.date_trunc(part.expr, date.expr))
+    return Expr(f.date_trunc(part.expr, _to_raw_expr(date)))
 
 
-def datetrunc(part: Expr | str, date: Expr) -> Expr:
+def datetrunc(part: Expr | str, date: Expr | str) -> Expr:
     """Truncates the date to a specified level of precision.
 
     See Also:
@@ -2874,71 +2811,68 @@ def make_time(hour: Expr | int, minute: Expr | int, second: Expr | int) -> Expr:
     return Expr(f.make_time(hour.expr, minute.expr, second.expr))
 
 
-def translate(string: Expr, from_val: Expr | str, to_val: Expr | str) -> Expr:
+def translate(string: Expr | str, from_val: Expr | str, to_val: Expr | str) -> Expr:
     """Replaces the characters in ``from_val`` with the counterpart in ``to_val``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(
-        ...     dfn.functions.translate(dfn.col("a"), "helo", "HELO").alias("t"))
+        >>> result = df.select(dfn.functions.translate("a", "helo", "HELO").alias("t"))
         >>> result.collect_column("t")[0].as_py()
         'HELLO'
     """
     from_val = coerce_to_expr(from_val)
     to_val = coerce_to_expr(to_val)
-    return Expr(f.translate(string.expr, from_val.expr, to_val.expr))
+    return Expr(f.translate(_to_raw_expr(string), from_val.expr, to_val.expr))
 
 
-def trim(arg: Expr) -> Expr:
+def trim(arg: Expr | str) -> Expr:
     """Removes all characters, spaces by default, from both sides of a string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["  hello  "]})
-        >>> result = df.select(dfn.functions.trim(dfn.col("a")).alias("t"))
+        >>> result = df.select(dfn.functions.trim("a").alias("t"))
         >>> result.collect_column("t")[0].as_py()
         'hello'
     """
-    return Expr(f.trim(arg.expr))
+    return Expr(f.trim(_to_raw_expr(arg)))
 
 
-def trunc(num: Expr, precision: Expr | int | None = None) -> Expr:
+def trunc(num: Expr | str, precision: Expr | int | None = None) -> Expr:
     """Truncate the number toward zero with optional precision.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.567]})
-        >>> result = df.select(
-        ...     dfn.functions.trunc(dfn.col("a")).alias("t"))
+        >>> result = df.select(dfn.functions.trunc("a").alias("t"))
         >>> result.collect_column("t")[0].as_py()
         1.0
 
-        >>> result = df.select(
-        ...     dfn.functions.trunc(dfn.col("a"), precision=2).alias("t"))
+        >>> result = df.select(dfn.functions.trunc("a", precision=2).alias("t"))
         >>> result.collect_column("t")[0].as_py()
         1.56
     """
     if precision is not None:
         precision = coerce_to_expr(precision)
-        return Expr(f.trunc(num.expr, precision.expr))
-    return Expr(f.trunc(num.expr))
+        return Expr(f.trunc(_to_raw_expr(num), precision.expr))
+    return Expr(f.trunc(_to_raw_expr(num)))
 
 
-def upper(arg: Expr) -> Expr:
+def upper(arg: Expr | str) -> Expr:
     """Converts a string to uppercase.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello"]})
-        >>> result = df.select(dfn.functions.upper(dfn.col("a")).alias("u"))
+        >>> result = df.select(dfn.functions.upper("a").alias("u"))
         >>> result.collect_column("u")[0].as_py()
         'HELLO'
     """
-    return Expr(f.upper(arg.expr))
+    return Expr(f.upper(_to_raw_expr(arg)))
 
 
-def make_array(*args: Expr) -> Expr:
+def make_array(*args: Expr | str) -> Expr:
     """Returns an array using the specified input expressions.
 
     Examples:
@@ -2951,11 +2885,11 @@ def make_array(*args: Expr) -> Expr:
         >>> result.collect_column("arr")[0].as_py()
         [1, 2, 3]
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.make_array(args))
 
 
-def make_list(*args: Expr) -> Expr:
+def make_list(*args: Expr | str) -> Expr:
     """Returns an array using the specified input expressions.
 
     See Also:
@@ -2964,7 +2898,7 @@ def make_list(*args: Expr) -> Expr:
     return make_array(*args)
 
 
-def array(*args: Expr) -> Expr:
+def array(*args: Expr | str) -> Expr:
     """Returns an array using the specified input expressions.
 
     See Also:
@@ -3002,17 +2936,13 @@ def uuid() -> Expr:
     return Expr(f.uuid())
 
 
-def struct(*args: Expr) -> Expr:
+def struct(*args: Expr | str) -> Expr:
     """Returns a struct with the given arguments.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1], "b": [2]})
-        >>> result = df.select(
-        ...     dfn.functions.struct(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("s")
-        ... )
+        >>> result = df.select(dfn.functions.struct("a", "b").alias("s"))
 
         Children in the new struct will always be `c0`, ..., `cN-1`
         for `N` children.
@@ -3020,11 +2950,11 @@ def struct(*args: Expr) -> Expr:
         >>> result.collect_column("s")[0].as_py() == {"c0": 1, "c1": 2}
         True
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.struct(*args))
 
 
-def named_struct(name_pairs: list[tuple[str, Expr]]) -> Expr:
+def named_struct(name_pairs: list[tuple[str, Expr | str]]) -> Expr:
     """Returns a struct with the given names and arguments pairs.
 
     Examples:
@@ -3038,47 +2968,44 @@ def named_struct(name_pairs: list[tuple[str, Expr]]) -> Expr:
         >>> result.collect_column("s")[0].as_py() == {"x": 10, "y": 20}
         True
     """
-    name_pair_exprs = [
-        [Expr.literal(pa.scalar(pair[0], type=pa.string())), pair[1]]
-        for pair in name_pairs
+    raw_pairs = [
+        raw
+        for name, value in name_pairs
+        for raw in (
+            Expr.literal(pa.scalar(name, type=pa.string())).expr,
+            _to_raw_expr(value),
+        )
     ]
-
-    # flatten
-    name_pairs = [x.expr for xs in name_pair_exprs for x in xs]
-    return Expr(f.named_struct(*name_pairs))
+    return Expr(f.named_struct(*raw_pairs))
 
 
-def from_unixtime(arg: Expr) -> Expr:
+def from_unixtime(arg: Expr | str) -> Expr:
     """Converts an integer to RFC3339 timestamp format string.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0]})
-        >>> result = df.select(
-        ...     dfn.functions.from_unixtime(
-        ...         dfn.col("a")
-        ...     ).alias("ts")
-        ... )
+        >>> result = df.select(dfn.functions.from_unixtime("a").alias("ts"))
         >>> str(result.collect_column("ts")[0].as_py())
         '1970-01-01 00:00:00'
     """
-    return Expr(f.from_unixtime(arg.expr))
+    return Expr(f.from_unixtime(_to_raw_expr(arg)))
 
 
-def arrow_typeof(arg: Expr) -> Expr:
+def arrow_typeof(arg: Expr | str) -> Expr:
     """Returns the Arrow type of the expression.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1]})
-        >>> result = df.select(dfn.functions.arrow_typeof(dfn.col("a")).alias("t"))
+        >>> result = df.select(dfn.functions.arrow_typeof("a").alias("t"))
         >>> result.collect_column("t")[0].as_py()
         'Int64'
     """
-    return Expr(f.arrow_typeof(arg.expr))
+    return Expr(f.arrow_typeof(_to_raw_expr(arg)))
 
 
-def arrow_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
+def arrow_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Expr:
     """Casts an expression to a specified data type.
 
     The ``data_type`` can be a string, a ``pyarrow.DataType``, or an
@@ -3092,15 +3019,13 @@ def arrow_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1]})
-        >>> result = df.select(
-        ...     dfn.functions.arrow_cast(dfn.col("a"), "Float64").alias("c")
-        ... )
+        >>> result = df.select(dfn.functions.arrow_cast("a", "Float64").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         1.0
 
         >>> result = df.select(
         ...     dfn.functions.arrow_cast(
-        ...         dfn.col("a"), data_type=pa.float64()
+        ...         "a", data_type=pa.float64()
         ...     ).alias("c")
         ... )
         >>> result.collect_column("c")[0].as_py()
@@ -3108,13 +3033,13 @@ def arrow_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
     """
     _warn_if_expr_for_literal_arg(data_type, "arrow_cast", "data_type")
     if isinstance(data_type, pa.DataType):
-        return expr.cast(data_type)
+        return Expr(_to_raw_expr(expr)).cast(data_type)
     if isinstance(data_type, str):
         data_type = Expr.string_literal(data_type)
-    return Expr(f.arrow_cast(expr.expr, data_type.expr))
+    return Expr(f.arrow_cast(_to_raw_expr(expr), data_type.expr))
 
 
-def arrow_try_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
+def arrow_try_cast(expr: Expr | str, data_type: Expr | str | pa.DataType) -> Expr:
     """Casts an expression to a specified data type, returning NULL on failure.
 
     Like :py:func:`arrow_cast` but produces NULL instead of erroring when the
@@ -3125,15 +3050,13 @@ def arrow_try_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["oops"]})
-        >>> result = df.select(
-        ...     dfn.functions.arrow_try_cast(dfn.col("a"), "Float64").alias("c")
-        ... )
+        >>> result = df.select(dfn.functions.arrow_try_cast("a", "Float64").alias("c"))
         >>> result.collect_column("c")[0].as_py() is None
         True
 
         >>> result = df.select(
         ...     dfn.functions.arrow_try_cast(
-        ...         dfn.col("a"), data_type=pa.float64()
+        ...         "a", data_type=pa.float64()
         ...     ).alias("c")
         ... )
         >>> result.collect_column("c")[0].as_py() is None
@@ -3141,13 +3064,13 @@ def arrow_try_cast(expr: Expr, data_type: Expr | str | pa.DataType) -> Expr:
     """
     _warn_if_expr_for_literal_arg(data_type, "arrow_try_cast", "data_type")
     if isinstance(data_type, pa.DataType):
-        return expr.try_cast(data_type)
+        return Expr(_to_raw_expr(expr)).try_cast(data_type)
     if isinstance(data_type, str):
         data_type = Expr.string_literal(data_type)
-    return Expr(f.arrow_try_cast(expr.expr, data_type.expr))
+    return Expr(f.arrow_try_cast(_to_raw_expr(expr), data_type.expr))
 
 
-def arrow_field(expr: Expr) -> Expr:
+def arrow_field(expr: Expr | str) -> Expr:
     """Returns the Arrow field information of an expression as a struct.
 
     The returned struct contains the field's name, data type, nullability,
@@ -3159,17 +3082,15 @@ def arrow_field(expr: Expr) -> Expr:
         >>> batch = pa.RecordBatch.from_arrays([pa.array([1])], schema=schema)
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.create_dataframe([[batch]])
-        >>> result = df.select(
-        ...     dfn.functions.arrow_field(dfn.col("val")).alias("f")
-        ... )
+        >>> result = df.select(dfn.functions.arrow_field("val").alias("f"))
         >>> out = result.collect_column("f")[0].as_py()
         >>> out["name"], out["data_type"], out["nullable"], out["metadata"]
         ('val', 'Int64', True, [('k', 'v')])
     """
-    return Expr(f.arrow_field(expr.expr))
+    return Expr(f.arrow_field(_to_raw_expr(expr)))
 
 
-def cast_to_type(value: Expr, type_ref: Expr) -> Expr:
+def cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
     """Casts ``value`` to the data type of ``type_ref``.
 
     Only the *type* of ``type_ref`` is used; its value is ignored. This is
@@ -3184,18 +3105,14 @@ def cast_to_type(value: Expr, type_ref: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1], "b": [1.0]})
-        >>> result = df.select(
-        ...     dfn.functions.cast_to_type(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("c")
-        ... )
+        >>> result = df.select(dfn.functions.cast_to_type("a", "b").alias("c"))
         >>> result.collect_column("c")[0].as_py()
         1.0
     """
-    return Expr(f.cast_to_type(value.expr, type_ref.expr))
+    return Expr(f.cast_to_type(_to_raw_expr(value), _to_raw_expr(type_ref)))
 
 
-def try_cast_to_type(value: Expr, type_ref: Expr) -> Expr:
+def try_cast_to_type(value: Expr | str, type_ref: Expr | str) -> Expr:
     """Casts ``value`` to the data type of ``type_ref``, NULL on failure.
 
     Like :py:func:`cast_to_type`, but casts that fail produce NULL instead
@@ -3208,18 +3125,14 @@ def try_cast_to_type(value: Expr, type_ref: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["oops"], "b": [1.0]})
-        >>> result = df.select(
-        ...     dfn.functions.try_cast_to_type(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("c")
-        ... )
+        >>> result = df.select(dfn.functions.try_cast_to_type("a", "b").alias("c"))
         >>> result.collect_column("c")[0].as_py() is None
         True
     """
-    return Expr(f.try_cast_to_type(value.expr, type_ref.expr))
+    return Expr(f.try_cast_to_type(_to_raw_expr(value), _to_raw_expr(type_ref)))
 
 
-def arrow_metadata(expr: Expr, key: Expr | str | None = None) -> Expr:
+def arrow_metadata(expr: Expr | str, key: Expr | str | None = None) -> Expr:
     """Returns the metadata of the input expression.
 
     If called with one argument, returns a Map of all metadata key-value pairs.
@@ -3231,29 +3144,27 @@ def arrow_metadata(expr: Expr, key: Expr | str | None = None) -> Expr:
         >>> batch = pa.RecordBatch.from_arrays([pa.array([1])], schema=schema)
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.create_dataframe([[batch]])
-        >>> result = df.select(
-        ...     dfn.functions.arrow_metadata(dfn.col("val")).alias("meta")
-        ... )
+        >>> result = df.select(dfn.functions.arrow_metadata("val").alias("meta"))
         >>> ("k", "v") in result.collect_column("meta")[0].as_py()
         True
 
         >>> result = df.select(
         ...     dfn.functions.arrow_metadata(
-        ...         dfn.col("val"), key="k"
+        ...         "val", key="k"
         ...     ).alias("meta_val")
         ... )
         >>> result.collect_column("meta_val")[0].as_py()
         'v'
     """
     if key is None:
-        return Expr(f.arrow_metadata(expr.expr))
+        return Expr(f.arrow_metadata(_to_raw_expr(expr)))
     _warn_if_expr_for_literal_arg(key, "arrow_metadata", "key")
     if isinstance(key, str):
         key = Expr.string_literal(key)
-    return Expr(f.arrow_metadata(expr.expr, key.expr))
+    return Expr(f.arrow_metadata(_to_raw_expr(expr), key.expr))
 
 
-def with_metadata(expr: Expr, metadata: dict[str, str]) -> Expr:
+def with_metadata(expr: Expr | str, metadata: dict[str, str]) -> Expr:
     """Attaches Arrow field metadata (key/value pairs) to the input expression.
 
     This is the inverse of :py:func:`arrow_metadata`. Existing metadata on the
@@ -3268,17 +3179,17 @@ def with_metadata(expr: Expr, metadata: dict[str, str]) -> Expr:
         >>> df = ctx.from_pydict({"a": [1]})
         >>> result = df.select(
         ...     dfn.functions.with_metadata(
-        ...         dfn.col("a"), {"unit": "ms"}
+        ...         "a", {"unit": "ms"}
         ...     ).alias("a")
         ... )
         >>> result.select(
-        ...     dfn.functions.arrow_metadata(dfn.col("a"), "unit").alias("u")
+        ...     dfn.functions.arrow_metadata("a", "unit").alias("u")
         ... ).collect_column("u")[0].as_py()
         'ms'
     """
     if not metadata:
         return expr
-    args = [expr.expr]
+    args = [_to_raw_expr(expr)]
     for k, v in metadata.items():
         if not k:
             msg = "with_metadata keys must be non-empty strings"
@@ -3288,7 +3199,7 @@ def with_metadata(expr: Expr, metadata: dict[str, str]) -> Expr:
     return Expr(f.with_metadata(*args))
 
 
-def get_field(expr: Expr, *names: Expr | str) -> Expr:
+def get_field(expr: Expr | str, *names: Expr | str) -> Expr:
     """Extracts a (possibly nested) field from a struct or map by name.
 
     Pass one name for a single-level lookup, or several names to walk a path
@@ -3312,9 +3223,7 @@ def get_field(expr: Expr, *names: Expr | str) -> Expr:
         ...     "s",
         ...     F.named_struct([("x", dfn.col("a")), ("y", dfn.col("b"))]),
         ... )
-        >>> result = df.select(
-        ...     F.get_field(dfn.col("s"), "x").alias("x_val")
-        ... )
+        >>> result = df.select(F.get_field("s", "x").alias("x_val"))
         >>> result.collect_column("x_val")[0].as_py()
         1
 
@@ -3332,9 +3241,7 @@ def get_field(expr: Expr, *names: Expr | str) -> Expr:
         ...     "outer",
         ...     F.named_struct([("inner", dfn.col("s"))]),
         ... )
-        >>> result = df.select(
-        ...     F.get_field(dfn.col("outer"), "inner", "x").alias("x_val")
-        ... )
+        >>> result = df.select(F.get_field("outer", "inner", "x").alias("x_val"))
         >>> result.collect_column("x_val")[0].as_py()
         1
     """
@@ -3342,10 +3249,10 @@ def get_field(expr: Expr, *names: Expr | str) -> Expr:
         msg = "get_field requires at least one field name"
         raise ValueError(msg)
     resolved = [Expr.string_literal(n) if isinstance(n, str) else n for n in names]
-    return Expr(f.get_field(expr.expr, [n.expr for n in resolved]))
+    return Expr(f.get_field(_to_raw_expr(expr), [n.expr for n in resolved]))
 
 
-def union_extract(union_expr: Expr, field_name: Expr | str) -> Expr:
+def union_extract(union_expr: Expr | str, field_name: Expr | str) -> Expr:
     """Extracts a value from a union type by field name.
 
     Returns the value of the named field if it is the currently selected
@@ -3361,18 +3268,16 @@ def union_extract(union_expr: Expr, field_name: Expr | str) -> Expr:
         ... )
         >>> batch = pa.RecordBatch.from_arrays([arr], names=["u"])
         >>> df = ctx.create_dataframe([[batch]])
-        >>> result = df.select(
-        ...     dfn.functions.union_extract(dfn.col("u"), "int").alias("val")
-        ... )
+        >>> result = df.select(dfn.functions.union_extract("u", "int").alias("val"))
         >>> result.collect_column("val").to_pylist()
         [1, None, 2]
     """
     if isinstance(field_name, str):
         field_name = Expr.string_literal(field_name)
-    return Expr(f.union_extract(union_expr.expr, field_name.expr))
+    return Expr(f.union_extract(_to_raw_expr(union_expr), field_name.expr))
 
 
-def union_tag(union_expr: Expr) -> Expr:
+def union_tag(union_expr: Expr | str) -> Expr:
     """Returns the tag (active field name) of a union type.
 
     Examples:
@@ -3385,13 +3290,11 @@ def union_tag(union_expr: Expr) -> Expr:
         ... )
         >>> batch = pa.RecordBatch.from_arrays([arr], names=["u"])
         >>> df = ctx.create_dataframe([[batch]])
-        >>> result = df.select(
-        ...     dfn.functions.union_tag(dfn.col("u")).alias("tag")
-        ... )
+        >>> result = df.select(dfn.functions.union_tag("u").alias("tag"))
         >>> result.collect_column("tag").to_pylist()
         ['int', 'str', 'int']
     """
-    return Expr(f.union_tag(union_expr.expr))
+    return Expr(f.union_tag(_to_raw_expr(union_expr)))
 
 
 def version() -> Expr:
@@ -3407,7 +3310,7 @@ def version() -> Expr:
     return Expr(f.version())
 
 
-def row(*args: Expr) -> Expr:
+def row(*args: Expr | str) -> Expr:
     """Returns a struct with the given arguments.
 
     See Also:
@@ -3432,21 +3335,21 @@ def random() -> Expr:
     return Expr(f.random())
 
 
-def array_append(array: Expr, element: Expr) -> Expr:
+def array_append(array: Expr | str, element: Expr) -> Expr:
     """Appends an element to the end of an array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
         >>> result = df.select(
-        ...     dfn.functions.array_append(dfn.col("a"), dfn.lit(4)).alias("result"))
+        ...     dfn.functions.array_append("a", dfn.lit(4)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    return Expr(f.array_append(array.expr, element.expr))
+    return Expr(f.array_append(_to_raw_expr(array), element.expr))
 
 
-def array_push_back(array: Expr, element: Expr) -> Expr:
+def array_push_back(array: Expr | str, element: Expr) -> Expr:
     """Appends an element to the end of an array.
 
     See Also:
@@ -3455,7 +3358,7 @@ def array_push_back(array: Expr, element: Expr) -> Expr:
     return array_append(array, element)
 
 
-def list_append(array: Expr, element: Expr) -> Expr:
+def list_append(array: Expr | str, element: Expr) -> Expr:
     """Appends an element to the end of an array.
 
     See Also:
@@ -3464,7 +3367,7 @@ def list_append(array: Expr, element: Expr) -> Expr:
     return array_append(array, element)
 
 
-def list_push_back(array: Expr, element: Expr) -> Expr:
+def list_push_back(array: Expr | str, element: Expr) -> Expr:
     """Appends an element to the end of an array.
 
     See Also:
@@ -3473,22 +3376,21 @@ def list_push_back(array: Expr, element: Expr) -> Expr:
     return array_append(array, element)
 
 
-def array_concat(*args: Expr) -> Expr:
+def array_concat(*args: Expr | str) -> Expr:
     """Concatenates the input arrays.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2]], "b": [[3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_concat(dfn.col("a"), dfn.col("b")).alias("result"))
+        >>> result = df.select(dfn.functions.array_concat("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    args = [arg.expr for arg in args]
+    args = _to_raw_expr_list(args)
     return Expr(f.array_concat(args))
 
 
-def array_cat(*args: Expr) -> Expr:
+def array_cat(*args: Expr | str) -> Expr:
     """Concatenates the input arrays.
 
     See Also:
@@ -3497,54 +3399,48 @@ def array_cat(*args: Expr) -> Expr:
     return array_concat(*args)
 
 
-def array_dims(array: Expr) -> Expr:
+def array_dims(array: Expr | str) -> Expr:
     """Returns an array of the array's dimensions.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(dfn.functions.array_dims(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_dims("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [3]
     """
-    return Expr(f.array_dims(array.expr))
+    return Expr(f.array_dims(_to_raw_expr(array)))
 
 
-def array_distinct(array: Expr) -> Expr:
+def array_distinct(array: Expr | str) -> Expr:
     """Returns distinct values from the array after removing duplicates.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_distinct(
-        ...         dfn.col("a")
-        ...     ).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.array_distinct("a").alias("result"))
         >>> sorted(
         ...     result.collect_column("result")[0].as_py()
         ... )
         [1, 2, 3]
     """
-    return Expr(f.array_distinct(array.expr))
+    return Expr(f.array_distinct(_to_raw_expr(array)))
 
 
-def array_compact(array: Expr) -> Expr:
+def array_compact(array: Expr | str) -> Expr:
     """Removes NULL values from the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, None, 2, None, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_compact(dfn.col("a")).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.array_compact("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3]
     """
-    return Expr(f.array_compact(array.expr))
+    return Expr(f.array_compact(_to_raw_expr(array)))
 
 
-def array_normalize(array: Expr) -> Expr:
+def array_normalize(array: Expr | str) -> Expr:
     """Scales a numeric array so it has Euclidean length 1.
 
     Treats the array as a vector and divides every element by the vector's
@@ -3563,25 +3459,21 @@ def array_normalize(array: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[3.0, 4.0]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_normalize(dfn.col("a")).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.array_normalize("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [0.6, 0.8]
 
         The zero vector has no direction to preserve, so the result is NULL:
 
         >>> df_zero = ctx.from_pydict({"a": [[0.0, 0.0]]})
-        >>> result = df_zero.select(
-        ...     dfn.functions.array_normalize(dfn.col("a")).alias("result")
-        ... )
+        >>> result = df_zero.select(dfn.functions.array_normalize("a").alias("result"))
         >>> result.collect_column("result")[0].as_py() is None
         True
     """
-    return Expr(f.array_normalize(array.expr))
+    return Expr(f.array_normalize(_to_raw_expr(array)))
 
 
-def cosine_distance(array1: Expr, array2: Expr) -> Expr:
+def cosine_distance(array1: Expr | str, array2: Expr | str) -> Expr:
     """Measures how much two numeric arrays differ in direction.
 
     Treats each input as a vector and compares the angle between them,
@@ -3611,11 +3503,7 @@ def cosine_distance(array1: Expr, array2: Expr) -> Expr:
         >>> df = ctx.from_pydict(
         ...     {"a": [[1.0, 2.0, 3.0]], "b": [[1.0, 2.0, 3.0]]}
         ... )
-        >>> result = df.select(
-        ...     dfn.functions.cosine_distance(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.cosine_distance("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         0.0
 
@@ -3626,16 +3514,16 @@ def cosine_distance(array1: Expr, array2: Expr) -> Expr:
         ... )
         >>> result = df_orth.select(
         ...     dfn.functions.cosine_distance(
-        ...         dfn.col("a"), dfn.col("b")
+        ...         "a", "b"
         ...     ).alias("result")
         ... )
         >>> result.collect_column("result")[0].as_py()
         1.0
     """
-    return Expr(f.cosine_distance(array1.expr, array2.expr))
+    return Expr(f.cosine_distance(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def inner_product(array1: Expr, array2: Expr) -> Expr:
+def inner_product(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the inner (dot) product of two numeric arrays.
 
     Treats each input as a vector and returns the sum of the element-wise
@@ -3654,11 +3542,7 @@ def inner_product(array1: Expr, array2: Expr) -> Expr:
         >>> df = ctx.from_pydict(
         ...     {"a": [[1.0, 2.0, 3.0]], "b": [[4.0, 5.0, 6.0]]}
         ... )
-        >>> result = df.select(
-        ...     dfn.functions.inner_product(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.inner_product("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         32.0
 
@@ -3669,16 +3553,16 @@ def inner_product(array1: Expr, array2: Expr) -> Expr:
         ... )
         >>> result = df_null.select(
         ...     dfn.functions.inner_product(
-        ...         dfn.col("a"), dfn.col("b")
+        ...         "a", "b"
         ...     ).alias("result")
         ... )
         >>> result.collect_column("result")[0].as_py() is None
         True
     """
-    return Expr(f.inner_product(array1.expr, array2.expr))
+    return Expr(f.inner_product(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def dot_product(array1: Expr, array2: Expr) -> Expr:
+def dot_product(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the inner (dot) product of two numeric arrays.
 
     See Also:
@@ -3687,7 +3571,7 @@ def dot_product(array1: Expr, array2: Expr) -> Expr:
     return inner_product(array1, array2)
 
 
-def list_cat(*args: Expr) -> Expr:
+def list_cat(*args: Expr | str) -> Expr:
     """Concatenates the input arrays.
 
     See Also:
@@ -3696,7 +3580,7 @@ def list_cat(*args: Expr) -> Expr:
     return array_concat(*args)
 
 
-def list_concat(*args: Expr) -> Expr:
+def list_concat(*args: Expr | str) -> Expr:
     """Concatenates the input arrays.
 
     See Also:
@@ -3705,7 +3589,7 @@ def list_concat(*args: Expr) -> Expr:
     return array_concat(*args)
 
 
-def list_distinct(array: Expr) -> Expr:
+def list_distinct(array: Expr | str) -> Expr:
     """Returns distinct values from the array after removing duplicates.
 
     See Also:
@@ -3714,7 +3598,7 @@ def list_distinct(array: Expr) -> Expr:
     return array_distinct(array)
 
 
-def list_compact(array: Expr) -> Expr:
+def list_compact(array: Expr | str) -> Expr:
     """Removes NULL values from the array.
 
     See Also:
@@ -3723,7 +3607,7 @@ def list_compact(array: Expr) -> Expr:
     return array_compact(array)
 
 
-def list_normalize(array: Expr) -> Expr:
+def list_normalize(array: Expr | str) -> Expr:
     """Scales a numeric array so it has Euclidean length 1.
 
     See Also:
@@ -3732,7 +3616,7 @@ def list_normalize(array: Expr) -> Expr:
     return array_normalize(array)
 
 
-def list_dims(array: Expr) -> Expr:
+def list_dims(array: Expr | str) -> Expr:
     """Returns an array of the array's dimensions.
 
     See Also:
@@ -3741,35 +3625,34 @@ def list_dims(array: Expr) -> Expr:
     return array_dims(array)
 
 
-def array_element(array: Expr, n: Expr | int) -> Expr:
+def array_element(array: Expr | str, n: Expr | int) -> Expr:
     """Extracts the element with the index n from the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[10, 20, 30]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_element(dfn.col("a"), 2).alias("result"))
+        >>> result = df.select(dfn.functions.array_element("a", 2).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         20
     """
     n = coerce_to_expr(n)
-    return Expr(f.array_element(array.expr, n.expr))
+    return Expr(f.array_element(_to_raw_expr(array), n.expr))
 
 
-def array_empty(array: Expr) -> Expr:
+def array_empty(array: Expr | str) -> Expr:
     """Returns a boolean indicating whether the array is empty.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2]]})
-        >>> result = df.select(dfn.functions.array_empty(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_empty("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         False
     """
-    return Expr(f.array_empty(array.expr))
+    return Expr(f.array_empty(_to_raw_expr(array)))
 
 
-def list_empty(array: Expr) -> Expr:
+def list_empty(array: Expr | str) -> Expr:
     """Returns a boolean indicating whether the array is empty.
 
     See Also:
@@ -3778,7 +3661,7 @@ def list_empty(array: Expr) -> Expr:
     return array_empty(array)
 
 
-def array_extract(array: Expr, n: Expr | int) -> Expr:
+def array_extract(array: Expr | str, n: Expr | int) -> Expr:
     """Extracts the element with the index n from the array.
 
     See Also:
@@ -3787,7 +3670,7 @@ def array_extract(array: Expr, n: Expr | int) -> Expr:
     return array_element(array, n)
 
 
-def list_element(array: Expr, n: Expr | int) -> Expr:
+def list_element(array: Expr | str, n: Expr | int) -> Expr:
     """Extracts the element with the index n from the array.
 
     See Also:
@@ -3796,7 +3679,7 @@ def list_element(array: Expr, n: Expr | int) -> Expr:
     return array_element(array, n)
 
 
-def list_extract(array: Expr, n: Expr | int) -> Expr:
+def list_extract(array: Expr | str, n: Expr | int) -> Expr:
     """Extracts the element with the index n from the array.
 
     See Also:
@@ -3805,20 +3688,20 @@ def list_extract(array: Expr, n: Expr | int) -> Expr:
     return array_element(array, n)
 
 
-def array_length(array: Expr) -> Expr:
+def array_length(array: Expr | str) -> Expr:
     """Returns the length of the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(dfn.functions.array_length(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_length("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.array_length(array.expr))
+    return Expr(f.array_length(_to_raw_expr(array)))
 
 
-def list_length(array: Expr) -> Expr:
+def list_length(array: Expr | str) -> Expr:
     """Returns the length of the array.
 
     See Also:
@@ -3827,21 +3710,20 @@ def list_length(array: Expr) -> Expr:
     return array_length(array)
 
 
-def array_has(first_array: Expr, second_array: Expr) -> Expr:
+def array_has(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Returns true if the element appears in the first array, otherwise false.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_has(dfn.col("a"), dfn.lit(2)).alias("result"))
+        >>> result = df.select(dfn.functions.array_has("a", dfn.lit(2)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has(first_array.expr, second_array.expr))
+    return Expr(f.array_has(_to_raw_expr(first_array), _to_raw_expr(second_array)))
 
 
-def array_has_all(first_array: Expr, second_array: Expr) -> Expr:
+def array_has_all(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Determines if there is complete overlap ``second_array`` in ``first_array``.
 
     Returns true if each element of the second array appears in the first array.
@@ -3850,15 +3732,14 @@ def array_has_all(first_array: Expr, second_array: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]], "b": [[1, 2]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_has_all(dfn.col("a"), dfn.col("b")).alias("result"))
+        >>> result = df.select(dfn.functions.array_has_all("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has_all(first_array.expr, second_array.expr))
+    return Expr(f.array_has_all(_to_raw_expr(first_array), _to_raw_expr(second_array)))
 
 
-def array_has_any(first_array: Expr, second_array: Expr) -> Expr:
+def array_has_any(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Determine if there is an overlap between ``first_array`` and ``second_array``.
 
     Returns true if at least one element of the second array appears in the first
@@ -3867,15 +3748,14 @@ def array_has_any(first_array: Expr, second_array: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]], "b": [[2, 5]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_has_any(dfn.col("a"), dfn.col("b")).alias("result"))
+        >>> result = df.select(dfn.functions.array_has_any("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         True
     """
-    return Expr(f.array_has_any(first_array.expr, second_array.expr))
+    return Expr(f.array_has_any(_to_raw_expr(first_array), _to_raw_expr(second_array)))
 
 
-def array_contains(array: Expr, element: Expr) -> Expr:
+def array_contains(array: Expr | str, element: Expr) -> Expr:
     """Returns true if the element appears in the array, otherwise false.
 
     See Also:
@@ -3884,7 +3764,7 @@ def array_contains(array: Expr, element: Expr) -> Expr:
     return array_has(array, element)
 
 
-def list_has(array: Expr, element: Expr) -> Expr:
+def list_has(array: Expr | str, element: Expr) -> Expr:
     """Returns true if the element appears in the array, otherwise false.
 
     See Also:
@@ -3893,7 +3773,7 @@ def list_has(array: Expr, element: Expr) -> Expr:
     return array_has(array, element)
 
 
-def list_has_all(first_array: Expr, second_array: Expr) -> Expr:
+def list_has_all(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Determines if there is complete overlap ``second_array`` in ``first_array``.
 
     See Also:
@@ -3902,7 +3782,7 @@ def list_has_all(first_array: Expr, second_array: Expr) -> Expr:
     return array_has_all(first_array, second_array)
 
 
-def list_has_any(first_array: Expr, second_array: Expr) -> Expr:
+def list_has_any(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Determine if there is an overlap between ``first_array`` and ``second_array``.
 
     See Also:
@@ -3911,7 +3791,7 @@ def list_has_any(first_array: Expr, second_array: Expr) -> Expr:
     return array_has_any(first_array, second_array)
 
 
-def arrays_overlap(first_array: Expr, second_array: Expr) -> Expr:
+def arrays_overlap(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Returns true if any element appears in both arrays.
 
     See Also:
@@ -3920,7 +3800,7 @@ def arrays_overlap(first_array: Expr, second_array: Expr) -> Expr:
     return array_has_any(first_array, second_array)
 
 
-def list_overlap(first_array: Expr, second_array: Expr) -> Expr:
+def list_overlap(first_array: Expr | str, second_array: Expr | str) -> Expr:
     """Returns true if any element appears in both arrays.
 
     See Also:
@@ -3929,7 +3809,7 @@ def list_overlap(first_array: Expr, second_array: Expr) -> Expr:
     return array_has_any(first_array, second_array)
 
 
-def list_contains(array: Expr, element: Expr) -> Expr:
+def list_contains(array: Expr | str, element: Expr) -> Expr:
     """Returns true if the element appears in the array, otherwise false.
 
     See Also:
@@ -3938,7 +3818,7 @@ def list_contains(array: Expr, element: Expr) -> Expr:
     return array_has(array, element)
 
 
-def array_position(array: Expr, element: Expr, index: int | None = 1) -> Expr:
+def array_position(array: Expr | str, element: Expr, index: int | None = 1) -> Expr:
     """Return the position of the first occurrence of ``element`` in ``array``.
 
     Examples:
@@ -3946,7 +3826,7 @@ def array_position(array: Expr, element: Expr, index: int | None = 1) -> Expr:
         >>> df = ctx.from_pydict({"a": [[10, 20, 30]]})
         >>> result = df.select(
         ...     dfn.functions.array_position(
-        ...         dfn.col("a"), dfn.lit(20)
+        ...         "a", dfn.lit(20)
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         2
@@ -3956,15 +3836,15 @@ def array_position(array: Expr, element: Expr, index: int | None = 1) -> Expr:
         >>> df = ctx.from_pydict({"a": [[10, 20, 10, 20]]})
         >>> result = df.select(
         ...     dfn.functions.array_position(
-        ...         dfn.col("a"), dfn.lit(20), index=3,
+        ...         "a", dfn.lit(20), index=3,
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         4
     """
-    return Expr(f.array_position(array.expr, element.expr, index))
+    return Expr(f.array_position(_to_raw_expr(array), element.expr, index))
 
 
-def array_indexof(array: Expr, element: Expr, index: int | None = 1) -> Expr:
+def array_indexof(array: Expr | str, element: Expr, index: int | None = 1) -> Expr:
     """Return the position of the first occurrence of ``element`` in ``array``.
 
     See Also:
@@ -3973,7 +3853,7 @@ def array_indexof(array: Expr, element: Expr, index: int | None = 1) -> Expr:
     return array_position(array, element, index)
 
 
-def list_position(array: Expr, element: Expr, index: int | None = 1) -> Expr:
+def list_position(array: Expr | str, element: Expr, index: int | None = 1) -> Expr:
     """Return the position of the first occurrence of ``element`` in ``array``.
 
     See Also:
@@ -3982,7 +3862,7 @@ def list_position(array: Expr, element: Expr, index: int | None = 1) -> Expr:
     return array_position(array, element, index)
 
 
-def list_indexof(array: Expr, element: Expr, index: int | None = 1) -> Expr:
+def list_indexof(array: Expr | str, element: Expr, index: int | None = 1) -> Expr:
     """Return the position of the first occurrence of ``element`` in ``array``.
 
     See Also:
@@ -3991,21 +3871,21 @@ def list_indexof(array: Expr, element: Expr, index: int | None = 1) -> Expr:
     return array_position(array, element, index)
 
 
-def array_positions(array: Expr, element: Expr) -> Expr:
+def array_positions(array: Expr | str, element: Expr) -> Expr:
     """Searches for an element in the array and returns all occurrences.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 1]]})
         >>> result = df.select(
-        ...     dfn.functions.array_positions(dfn.col("a"), dfn.lit(1)).alias("result"))
+        ...     dfn.functions.array_positions("a", dfn.lit(1)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 3]
     """
-    return Expr(f.array_positions(array.expr, element.expr))
+    return Expr(f.array_positions(_to_raw_expr(array), element.expr))
 
 
-def list_positions(array: Expr, element: Expr) -> Expr:
+def list_positions(array: Expr | str, element: Expr) -> Expr:
     """Searches for an element in the array and returns all occurrences.
 
     See Also:
@@ -4014,20 +3894,20 @@ def list_positions(array: Expr, element: Expr) -> Expr:
     return array_positions(array, element)
 
 
-def array_ndims(array: Expr) -> Expr:
+def array_ndims(array: Expr | str) -> Expr:
     """Returns the number of dimensions of the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(dfn.functions.array_ndims(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_ndims("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         1
     """
-    return Expr(f.array_ndims(array.expr))
+    return Expr(f.array_ndims(_to_raw_expr(array)))
 
 
-def list_ndims(array: Expr) -> Expr:
+def list_ndims(array: Expr | str) -> Expr:
     """Returns the number of dimensions of the array.
 
     See Also:
@@ -4036,21 +3916,21 @@ def list_ndims(array: Expr) -> Expr:
     return array_ndims(array)
 
 
-def array_prepend(element: Expr, array: Expr) -> Expr:
+def array_prepend(element: Expr, array: Expr | str) -> Expr:
     """Prepends an element to the beginning of an array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2]]})
         >>> result = df.select(
-        ...     dfn.functions.array_prepend(dfn.lit(0), dfn.col("a")).alias("result"))
+        ...     dfn.functions.array_prepend(dfn.lit(0), "a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [0, 1, 2]
     """
-    return Expr(f.array_prepend(element.expr, array.expr))
+    return Expr(f.array_prepend(element.expr, _to_raw_expr(array)))
 
 
-def array_push_front(element: Expr, array: Expr) -> Expr:
+def array_push_front(element: Expr, array: Expr | str) -> Expr:
     """Prepends an element to the beginning of an array.
 
     See Also:
@@ -4059,7 +3939,7 @@ def array_push_front(element: Expr, array: Expr) -> Expr:
     return array_prepend(element, array)
 
 
-def list_prepend(element: Expr, array: Expr) -> Expr:
+def list_prepend(element: Expr, array: Expr | str) -> Expr:
     """Prepends an element to the beginning of an array.
 
     See Also:
@@ -4068,7 +3948,7 @@ def list_prepend(element: Expr, array: Expr) -> Expr:
     return array_prepend(element, array)
 
 
-def list_push_front(element: Expr, array: Expr) -> Expr:
+def list_push_front(element: Expr, array: Expr | str) -> Expr:
     """Prepends an element to the beginning of an array.
 
     See Also:
@@ -4077,35 +3957,33 @@ def list_push_front(element: Expr, array: Expr) -> Expr:
     return array_prepend(element, array)
 
 
-def array_pop_back(array: Expr) -> Expr:
+def array_pop_back(array: Expr | str) -> Expr:
     """Returns the array without the last element.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_pop_back(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_pop_back("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2]
     """
-    return Expr(f.array_pop_back(array.expr))
+    return Expr(f.array_pop_back(_to_raw_expr(array)))
 
 
-def array_pop_front(array: Expr) -> Expr:
+def array_pop_front(array: Expr | str) -> Expr:
     """Returns the array without the first element.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_pop_front(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_pop_front("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [2, 3]
     """
-    return Expr(f.array_pop_front(array.expr))
+    return Expr(f.array_pop_front(_to_raw_expr(array)))
 
 
-def list_pop_back(array: Expr) -> Expr:
+def list_pop_back(array: Expr | str) -> Expr:
     """Returns the array without the last element.
 
     See Also:
@@ -4114,7 +3992,7 @@ def list_pop_back(array: Expr) -> Expr:
     return array_pop_back(array)
 
 
-def list_pop_front(array: Expr) -> Expr:
+def list_pop_front(array: Expr | str) -> Expr:
     """Returns the array without the first element.
 
     See Also:
@@ -4123,21 +4001,21 @@ def list_pop_front(array: Expr) -> Expr:
     return array_pop_front(array)
 
 
-def array_remove(array: Expr, element: Expr) -> Expr:
+def array_remove(array: Expr | str, element: Expr) -> Expr:
     """Removes the first element from the array equal to the given value.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 1]]})
         >>> result = df.select(
-        ...     dfn.functions.array_remove(dfn.col("a"), dfn.lit(1)).alias("result"))
+        ...     dfn.functions.array_remove("a", dfn.lit(1)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [2, 1]
     """
-    return Expr(f.array_remove(array.expr, element.expr))
+    return Expr(f.array_remove(_to_raw_expr(array), element.expr))
 
 
-def list_remove(array: Expr, element: Expr) -> Expr:
+def list_remove(array: Expr | str, element: Expr) -> Expr:
     """Removes the first element from the array equal to the given value.
 
     See Also:
@@ -4146,7 +4024,7 @@ def list_remove(array: Expr, element: Expr) -> Expr:
     return array_remove(array, element)
 
 
-def array_remove_n(array: Expr, element: Expr, max: Expr | int) -> Expr:
+def array_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
     """Removes the first ``max`` elements from the array equal to the given value.
 
     Examples:
@@ -4154,16 +4032,16 @@ def array_remove_n(array: Expr, element: Expr, max: Expr | int) -> Expr:
         >>> df = ctx.from_pydict({"a": [[1, 2, 1, 1]]})
         >>> result = df.select(
         ...     dfn.functions.array_remove_n(
-        ...         dfn.col("a"), dfn.lit(1), 2
+        ...         "a", dfn.lit(1), 2
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [2, 1]
     """
     max = coerce_to_expr(max)
-    return Expr(f.array_remove_n(array.expr, element.expr, max.expr))
+    return Expr(f.array_remove_n(_to_raw_expr(array), element.expr, max.expr))
 
 
-def list_remove_n(array: Expr, element: Expr, max: Expr | int) -> Expr:
+def list_remove_n(array: Expr | str, element: Expr, max: Expr | int) -> Expr:
     """Removes the first ``max`` elements from the array equal to the given value.
 
     See Also:
@@ -4172,7 +4050,7 @@ def list_remove_n(array: Expr, element: Expr, max: Expr | int) -> Expr:
     return array_remove_n(array, element, max)
 
 
-def array_remove_all(array: Expr, element: Expr) -> Expr:
+def array_remove_all(array: Expr | str, element: Expr) -> Expr:
     """Removes all elements from the array equal to the given value.
 
     Examples:
@@ -4180,15 +4058,15 @@ def array_remove_all(array: Expr, element: Expr) -> Expr:
         >>> df = ctx.from_pydict({"a": [[1, 2, 1]]})
         >>> result = df.select(
         ...     dfn.functions.array_remove_all(
-        ...         dfn.col("a"), dfn.lit(1)
+        ...         "a", dfn.lit(1)
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [2]
     """
-    return Expr(f.array_remove_all(array.expr, element.expr))
+    return Expr(f.array_remove_all(_to_raw_expr(array), element.expr))
 
 
-def list_remove_all(array: Expr, element: Expr) -> Expr:
+def list_remove_all(array: Expr | str, element: Expr) -> Expr:
     """Removes all elements from the array equal to the given value.
 
     See Also:
@@ -4221,22 +4099,22 @@ def list_repeat(element: Expr, count: Expr | int) -> Expr:
     return array_repeat(element, count)
 
 
-def array_replace(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
+def array_replace(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
     """Replaces the first occurrence of ``from_val`` with ``to_val``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 1]]})
         >>> result = df.select(
-        ...     dfn.functions.array_replace(dfn.col("a"), dfn.lit(1),
+        ...     dfn.functions.array_replace("a", dfn.lit(1),
         ...     dfn.lit(9)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 1]
     """
-    return Expr(f.array_replace(array.expr, from_val.expr, to_val.expr))
+    return Expr(f.array_replace(_to_raw_expr(array), from_val.expr, to_val.expr))
 
 
-def list_replace(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
+def list_replace(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
     """Replaces the first occurrence of ``from_val`` with ``to_val``.
 
     See Also:
@@ -4245,7 +4123,9 @@ def list_replace(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
     return array_replace(array, from_val, to_val)
 
 
-def array_replace_n(array: Expr, from_val: Expr, to_val: Expr, max: Expr | int) -> Expr:
+def array_replace_n(
+    array: Expr | str, from_val: Expr, to_val: Expr, max: Expr | int
+) -> Expr:
     """Replace ``n`` occurrences of ``from_val`` with ``to_val``.
 
     Replaces the first ``max`` occurrences of the specified element with another
@@ -4256,16 +4136,20 @@ def array_replace_n(array: Expr, from_val: Expr, to_val: Expr, max: Expr | int) 
         >>> df = ctx.from_pydict({"a": [[1, 2, 1, 1]]})
         >>> result = df.select(
         ...     dfn.functions.array_replace_n(
-        ...         dfn.col("a"), dfn.lit(1), dfn.lit(9), 2
+        ...         "a", dfn.lit(1), dfn.lit(9), 2
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 9, 1]
     """
     max = coerce_to_expr(max)
-    return Expr(f.array_replace_n(array.expr, from_val.expr, to_val.expr, max.expr))
+    return Expr(
+        f.array_replace_n(_to_raw_expr(array), from_val.expr, to_val.expr, max.expr)
+    )
 
 
-def list_replace_n(array: Expr, from_val: Expr, to_val: Expr, max: Expr | int) -> Expr:
+def list_replace_n(
+    array: Expr | str, from_val: Expr, to_val: Expr, max: Expr | int
+) -> Expr:
     """Replace ``n`` occurrences of ``from_val`` with ``to_val``.
 
     Replaces the first ``max`` occurrences of the specified element with another
@@ -4277,22 +4161,22 @@ def list_replace_n(array: Expr, from_val: Expr, to_val: Expr, max: Expr | int) -
     return array_replace_n(array, from_val, to_val, max)
 
 
-def array_replace_all(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
+def array_replace_all(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
     """Replaces all occurrences of ``from_val`` with ``to_val``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 1]]})
         >>> result = df.select(
-        ...     dfn.functions.array_replace_all(dfn.col("a"), dfn.lit(1),
+        ...     dfn.functions.array_replace_all("a", dfn.lit(1),
         ...     dfn.lit(9)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [9, 2, 9]
     """
-    return Expr(f.array_replace_all(array.expr, from_val.expr, to_val.expr))
+    return Expr(f.array_replace_all(_to_raw_expr(array), from_val.expr, to_val.expr))
 
 
-def list_replace_all(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
+def list_replace_all(array: Expr | str, from_val: Expr, to_val: Expr) -> Expr:
     """Replaces all occurrences of ``from_val`` with ``to_val``.
 
     See Also:
@@ -4301,7 +4185,9 @@ def list_replace_all(array: Expr, from_val: Expr, to_val: Expr) -> Expr:
     return array_replace_all(array, from_val, to_val)
 
 
-def array_sort(array: Expr, descending: bool = False, null_first: bool = False) -> Expr:
+def array_sort(
+    array: Expr | str, descending: bool = False, null_first: bool = False
+) -> Expr:
     """Sort an array.
 
     Args:
@@ -4312,17 +4198,14 @@ def array_sort(array: Expr, descending: bool = False, null_first: bool = False) 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[3, 1, 2]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_sort(
-        ...         dfn.col("a")
-        ...     ).alias("result"))
+        >>> result = df.select(dfn.functions.array_sort("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3]
 
         >>> df = ctx.from_pydict({"a": [[3, None, 1]]})
         >>> result = df.select(
         ...     dfn.functions.array_sort(
-        ...         dfn.col("a"), descending=True, null_first=True,
+        ...         "a", descending=True, null_first=True,
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [None, 3, 1]
@@ -4331,14 +4214,16 @@ def array_sort(array: Expr, descending: bool = False, null_first: bool = False) 
     nulls_first = "NULLS FIRST" if null_first else "NULLS LAST"
     return Expr(
         f.array_sort(
-            array.expr,
+            _to_raw_expr(array),
             Expr.literal(pa.scalar(desc, type=pa.string())).expr,
             Expr.literal(pa.scalar(nulls_first, type=pa.string())).expr,
         )
     )
 
 
-def list_sort(array: Expr, descending: bool = False, null_first: bool = False) -> Expr:
+def list_sort(
+    array: Expr | str, descending: bool = False, null_first: bool = False
+) -> Expr:
     """Sorts the array.
 
     See Also:
@@ -4348,7 +4233,7 @@ def list_sort(array: Expr, descending: bool = False, null_first: bool = False) -
 
 
 def array_slice(
-    array: Expr,
+    array: Expr | str,
     begin: Expr | int,
     end: Expr | int,
     stride: Expr | int | None = None,
@@ -4358,8 +4243,7 @@ def array_slice(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_slice(dfn.col("a"), 2, 3).alias("result"))
+        >>> result = df.select(dfn.functions.array_slice("a", 2, 3).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [2, 3]
 
@@ -4367,7 +4251,7 @@ def array_slice(
 
         >>> result = df.select(
         ...     dfn.functions.array_slice(
-        ...         dfn.col("a"), 1, 4, stride=2,
+        ...         "a", 1, 4, stride=2,
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 3]
@@ -4377,7 +4261,7 @@ def array_slice(
     stride = coerce_to_expr_or_none(stride)
     return Expr(
         f.array_slice(
-            array.expr,
+            _to_raw_expr(array),
             begin.expr,
             end.expr,
             stride.expr if stride is not None else None,
@@ -4386,7 +4270,10 @@ def array_slice(
 
 
 def list_slice(
-    array: Expr, begin: Expr | int, end: Expr | int, stride: Expr | int | None = None
+    array: Expr | str,
+    begin: Expr | int,
+    end: Expr | int,
+    stride: Expr | int | None = None,
 ) -> Expr:
     """Returns a slice of the array.
 
@@ -4396,26 +4283,22 @@ def list_slice(
     return array_slice(array, begin, end, stride)
 
 
-def array_intersect(array1: Expr, array2: Expr) -> Expr:
+def array_intersect(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the intersection of ``array1`` and ``array2``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]], "b": [[2, 3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_intersect(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.array_intersect("a", "b").alias("result"))
         >>> sorted(
         ...     result.collect_column("result")[0].as_py()
         ... )
         [2, 3]
     """
-    return Expr(f.array_intersect(array1.expr, array2.expr))
+    return Expr(f.array_intersect(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def list_intersect(array1: Expr, array2: Expr) -> Expr:
+def list_intersect(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns an the intersection of ``array1`` and ``array2``.
 
     See Also:
@@ -4424,7 +4307,7 @@ def list_intersect(array1: Expr, array2: Expr) -> Expr:
     return array_intersect(array1, array2)
 
 
-def array_union(array1: Expr, array2: Expr) -> Expr:
+def array_union(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns an array of the elements in the union of array1 and array2.
 
     Duplicate rows will not be returned.
@@ -4432,20 +4315,16 @@ def array_union(array1: Expr, array2: Expr) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]], "b": [[2, 3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_union(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("result")
-        ... )
+        >>> result = df.select(dfn.functions.array_union("a", "b").alias("result"))
         >>> sorted(
         ...     result.collect_column("result")[0].as_py()
         ... )
         [1, 2, 3, 4]
     """
-    return Expr(f.array_union(array1.expr, array2.expr))
+    return Expr(f.array_union(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def list_union(array1: Expr, array2: Expr) -> Expr:
+def list_union(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns an array of the elements in the union of array1 and array2.
 
     Duplicate rows will not be returned.
@@ -4456,21 +4335,20 @@ def list_union(array1: Expr, array2: Expr) -> Expr:
     return array_union(array1, array2)
 
 
-def array_except(array1: Expr, array2: Expr) -> Expr:
+def array_except(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the elements that appear in ``array1`` but not in ``array2``.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]], "b": [[2, 3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_except(dfn.col("a"), dfn.col("b")).alias("result"))
+        >>> result = df.select(dfn.functions.array_except("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1]
     """
-    return Expr(f.array_except(array1.expr, array2.expr))
+    return Expr(f.array_except(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def list_except(array1: Expr, array2: Expr) -> Expr:
+def list_except(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the elements that appear in ``array1`` but not in the ``array2``.
 
     See Also:
@@ -4479,7 +4357,7 @@ def list_except(array1: Expr, array2: Expr) -> Expr:
     return array_except(array1, array2)
 
 
-def array_resize(array: Expr, size: Expr | int, value: Expr) -> Expr:
+def array_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
     """Returns an array with the specified size filled.
 
     If ``size`` is greater than the ``array`` length, the additional entries will
@@ -4489,15 +4367,15 @@ def array_resize(array: Expr, size: Expr | int, value: Expr) -> Expr:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2]]})
         >>> result = df.select(
-        ...     dfn.functions.array_resize(dfn.col("a"), 4, dfn.lit(0)).alias("result"))
+        ...     dfn.functions.array_resize("a", 4, dfn.lit(0)).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 0, 0]
     """
     size = coerce_to_expr(size)
-    return Expr(f.array_resize(array.expr, size.expr, value.expr))
+    return Expr(f.array_resize(_to_raw_expr(array), size.expr, value.expr))
 
 
-def list_resize(array: Expr, size: Expr | int, value: Expr) -> Expr:
+def list_resize(array: Expr | str, size: Expr | int, value: Expr) -> Expr:
     """Returns an array with the specified size filled.
 
     If ``size`` is greater than the ``array`` length, the additional entries will be
@@ -4509,21 +4387,20 @@ def list_resize(array: Expr, size: Expr | int, value: Expr) -> Expr:
     return array_resize(array, size, value)
 
 
-def array_any_value(array: Expr) -> Expr:
+def array_any_value(array: Expr | str) -> Expr:
     """Returns the first non-null element in the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[None, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_any_value(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_any_value("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         2
     """
-    return Expr(f.array_any_value(array.expr))
+    return Expr(f.array_any_value(_to_raw_expr(array)))
 
 
-def list_any_value(array: Expr) -> Expr:
+def list_any_value(array: Expr | str) -> Expr:
     """Returns the first non-null element in the array.
 
     See Also:
@@ -4532,23 +4409,20 @@ def list_any_value(array: Expr) -> Expr:
     return array_any_value(array)
 
 
-def array_distance(array1: Expr, array2: Expr) -> Expr:
+def array_distance(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the Euclidean distance between two numeric arrays.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1.0, 2.0]], "b": [[1.0, 4.0]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_distance(
-        ...         dfn.col("a"), dfn.col("b"),
-        ...     ).alias("result"))
+        >>> result = df.select(dfn.functions.array_distance("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         2.0
     """
-    return Expr(f.array_distance(array1.expr, array2.expr))
+    return Expr(f.array_distance(_to_raw_expr(array1), _to_raw_expr(array2)))
 
 
-def list_distance(array1: Expr, array2: Expr) -> Expr:
+def list_distance(array1: Expr | str, array2: Expr | str) -> Expr:
     """Returns the Euclidean distance between two numeric arrays.
 
     See Also:
@@ -4557,21 +4431,20 @@ def list_distance(array1: Expr, array2: Expr) -> Expr:
     return array_distance(array1, array2)
 
 
-def array_max(array: Expr) -> Expr:
+def array_max(array: Expr | str) -> Expr:
     """Returns the maximum value in the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_max(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_max("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.array_max(array.expr))
+    return Expr(f.array_max(_to_raw_expr(array)))
 
 
-def list_max(array: Expr) -> Expr:
+def list_max(array: Expr | str) -> Expr:
     """Returns the maximum value in the array.
 
     See Also:
@@ -4580,21 +4453,20 @@ def list_max(array: Expr) -> Expr:
     return array_max(array)
 
 
-def array_min(array: Expr) -> Expr:
+def array_min(array: Expr | str) -> Expr:
     """Returns the minimum value in the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_min(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_min("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         1
     """
-    return Expr(f.array_min(array.expr))
+    return Expr(f.array_min(_to_raw_expr(array)))
 
 
-def list_min(array: Expr) -> Expr:
+def list_min(array: Expr | str) -> Expr:
     """Returns the minimum value in the array.
 
     See Also:
@@ -4603,21 +4475,20 @@ def list_min(array: Expr) -> Expr:
     return array_min(array)
 
 
-def array_reverse(array: Expr) -> Expr:
+def array_reverse(array: Expr | str) -> Expr:
     """Reverses the order of elements in the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(
-        ...     dfn.functions.array_reverse(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.array_reverse("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [3, 2, 1]
     """
-    return Expr(f.array_reverse(array.expr))
+    return Expr(f.array_reverse(_to_raw_expr(array)))
 
 
-def list_reverse(array: Expr) -> Expr:
+def list_reverse(array: Expr | str) -> Expr:
     """Reverses the order of elements in the array.
 
     See Also:
@@ -4626,22 +4497,21 @@ def list_reverse(array: Expr) -> Expr:
     return array_reverse(array)
 
 
-def arrays_zip(*arrays: Expr) -> Expr:
+def arrays_zip(*arrays: Expr | str) -> Expr:
     """Combines multiple arrays into a single array of structs.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2]], "b": [[3, 4]]})
-        >>> result = df.select(
-        ...     dfn.functions.arrays_zip(dfn.col("a"), dfn.col("b")).alias("result"))
+        >>> result = df.select(dfn.functions.arrays_zip("a", "b").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [{'1': 1, '2': 3}, {'1': 2, '2': 4}]
     """
-    args = [a.expr for a in arrays]
+    args = _to_raw_expr_list(arrays)
     return Expr(f.arrays_zip(args))
 
 
-def list_zip(*arrays: Expr) -> Expr:
+def list_zip(*arrays: Expr | str) -> Expr:
     """Combines multiple arrays into a single array of structs.
 
     See Also:
@@ -4651,7 +4521,7 @@ def list_zip(*arrays: Expr) -> Expr:
 
 
 def string_to_array(
-    string: Expr, delimiter: Expr | str, null_string: Expr | str | None = None
+    string: Expr | str, delimiter: Expr | str, null_string: Expr | str | None = None
 ) -> Expr:
     """Splits a string based on a delimiter and returns an array of parts.
 
@@ -4660,8 +4530,7 @@ def string_to_array(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": ["hello,world"]})
-        >>> result = df.select(
-        ...     dfn.functions.string_to_array(dfn.col("a"), ",").alias("result"))
+        >>> result = df.select(dfn.functions.string_to_array("a", ",").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         ['hello', 'world']
 
@@ -4669,7 +4538,7 @@ def string_to_array(
 
         >>> result = df.select(
         ...     dfn.functions.string_to_array(
-        ...         dfn.col("a"), ",", null_string="world",
+        ...         "a", ",", null_string="world",
         ...     ).alias("result"))
         >>> result.collect_column("result")[0].as_py()
         ['hello', None]
@@ -4678,7 +4547,7 @@ def string_to_array(
     null_string = coerce_to_expr_or_none(null_string)
     return Expr(
         f.string_to_array(
-            string.expr,
+            _to_raw_expr(string),
             delimiter.expr,
             null_string.expr if null_string is not None else None,
         )
@@ -4686,7 +4555,7 @@ def string_to_array(
 
 
 def string_to_list(
-    string: Expr, delimiter: Expr | str, null_string: Expr | str | None = None
+    string: Expr | str, delimiter: Expr | str, null_string: Expr | str | None = None
 ) -> Expr:
     """Splits a string based on a delimiter and returns an array of parts.
 
@@ -4735,33 +4604,33 @@ def generate_series(start: Expr, stop: Expr, step: Expr | None = None) -> Expr:
     return gen_series(start, stop, step)
 
 
-def flatten(array: Expr) -> Expr:
+def flatten(array: Expr | str) -> Expr:
     """Flattens an array of arrays into a single array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[[1, 2], [3, 4]]]})
-        >>> result = df.select(dfn.functions.flatten(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.flatten("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         [1, 2, 3, 4]
     """
-    return Expr(f.flatten(array.expr))
+    return Expr(f.flatten(_to_raw_expr(array)))
 
 
-def cardinality(array: Expr) -> Expr:
+def cardinality(array: Expr | str) -> Expr:
     """Returns the total number of elements in the array.
 
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [[1, 2, 3]]})
-        >>> result = df.select(dfn.functions.cardinality(dfn.col("a")).alias("result"))
+        >>> result = df.select(dfn.functions.cardinality("a").alias("result"))
         >>> result.collect_column("result")[0].as_py()
         3
     """
-    return Expr(f.cardinality(array.expr))
+    return Expr(f.cardinality(_to_raw_expr(array)))
 
 
-def empty(array: Expr) -> Expr:
+def empty(array: Expr | str) -> Expr:
     """Returns true if the array is empty.
 
     See Also:
@@ -4843,7 +4712,7 @@ def make_map(*args: Any) -> Expr:
     return Expr(f.make_map([k.expr for k in key_exprs], [v.expr for v in val_exprs]))
 
 
-def map_keys(map: Expr) -> Expr:
+def map_keys(map: Expr | str) -> Expr:
     """Returns a list of all keys in the map.
 
     Examples:
@@ -4851,15 +4720,14 @@ def map_keys(map: Expr) -> Expr:
         >>> df = ctx.from_pydict({"a": [1]})
         >>> df = df.select(
         ...     dfn.functions.make_map({"x": 1, "y": 2}).alias("m"))
-        >>> result = df.select(
-        ...     dfn.functions.map_keys(dfn.col("m")).alias("keys"))
+        >>> result = df.select(dfn.functions.map_keys("m").alias("keys"))
         >>> result.collect_column("keys")[0].as_py()
         ['x', 'y']
     """
-    return Expr(f.map_keys(map.expr))
+    return Expr(f.map_keys(_to_raw_expr(map)))
 
 
-def map_values(map: Expr) -> Expr:
+def map_values(map: Expr | str) -> Expr:
     """Returns a list of all values in the map.
 
     Examples:
@@ -4867,15 +4735,14 @@ def map_values(map: Expr) -> Expr:
         >>> df = ctx.from_pydict({"a": [1]})
         >>> df = df.select(
         ...     dfn.functions.make_map({"x": 1, "y": 2}).alias("m"))
-        >>> result = df.select(
-        ...     dfn.functions.map_values(dfn.col("m")).alias("vals"))
+        >>> result = df.select(dfn.functions.map_values("m").alias("vals"))
         >>> result.collect_column("vals")[0].as_py()
         [1, 2]
     """
-    return Expr(f.map_values(map.expr))
+    return Expr(f.map_values(_to_raw_expr(map)))
 
 
-def map_extract(map: Expr, key: Expr) -> Expr:
+def map_extract(map: Expr | str, key: Expr) -> Expr:
     """Returns the value for a given key in the map.
 
     Returns ``[None]`` if the key is absent.
@@ -4887,15 +4754,15 @@ def map_extract(map: Expr, key: Expr) -> Expr:
         ...     dfn.functions.make_map({"x": 1, "y": 2}).alias("m"))
         >>> result = df.select(
         ...     dfn.functions.map_extract(
-        ...         dfn.col("m"), dfn.lit("x")
+        ...         "m", dfn.lit("x")
         ...     ).alias("val"))
         >>> result.collect_column("val")[0].as_py()
         [1]
     """
-    return Expr(f.map_extract(map.expr, key.expr))
+    return Expr(f.map_extract(_to_raw_expr(map), key.expr))
 
 
-def map_entries(map: Expr) -> Expr:
+def map_entries(map: Expr | str) -> Expr:
     """Returns a list of all entries (key-value struct pairs) in the map.
 
     Examples:
@@ -4903,15 +4770,14 @@ def map_entries(map: Expr) -> Expr:
         >>> df = ctx.from_pydict({"a": [1]})
         >>> df = df.select(
         ...     dfn.functions.make_map({"x": 1, "y": 2}).alias("m"))
-        >>> result = df.select(
-        ...     dfn.functions.map_entries(dfn.col("m")).alias("entries"))
+        >>> result = df.select(dfn.functions.map_entries("m").alias("entries"))
         >>> result.collect_column("entries")[0].as_py()
         [{'key': 'x', 'value': 1}, {'key': 'y', 'value': 2}]
     """
-    return Expr(f.map_entries(map.expr))
+    return Expr(f.map_entries(_to_raw_expr(map)))
 
 
-def element_at(map: Expr, key: Expr) -> Expr:
+def element_at(map: Expr | str, key: Expr) -> Expr:
     """Returns the value for a given key in the map.
 
     Returns ``[None]`` if the key is absent.
@@ -4924,8 +4790,8 @@ def element_at(map: Expr, key: Expr) -> Expr:
 
 # aggregate functions
 def approx_distinct(
-    expression: Expr,
-    filter: Expr | None = None,
+    expression: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Returns the approximate number of distinct values.
 
@@ -4943,27 +4809,24 @@ def approx_distinct(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.approx_distinct(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.approx_distinct("a").alias("v")])
         >>> result.collect_column("v")[0].as_py() == 3
         True
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_distinct(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py() == 2
         True
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.approx_distinct(expression.expr, filter=filter_raw))
+    return Expr(f.approx_distinct(_to_raw_expr(expression), filter=filter_raw))
 
 
-def approx_median(expression: Expr, filter: Expr | None = None) -> Expr:
+def approx_median(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Returns the approximate median value.
 
     This aggregate function is similar to :py:func:`median`, but it will only
@@ -4979,30 +4842,27 @@ def approx_median(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.approx_median(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.approx_median("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_median(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.approx_median(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.approx_median(_to_raw_expr(expression), filter=filter_raw))
 
 
 def approx_percentile_cont(
-    sort_expression: Expr | SortExpr,
+    sort_expression: Expr | str | SortExpr,
     percentile: float,
     num_centroids: int | None = None,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Returns the value that is approximately at a given percentile of ``expr``.
 
@@ -5030,14 +4890,14 @@ def approx_percentile_cont(
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0, 4.0, 5.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_percentile_cont(
-        ...         dfn.col("a"), 0.5
+        ...         "a", 0.5
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_percentile_cont(
-        ...         dfn.col("a"), 0.5,
+        ...         "a", 0.5,
         ...         num_centroids=10,
         ...         filter=dfn.col("a") > dfn.lit(1.0),
         ...     ).alias("v")])
@@ -5045,7 +4905,7 @@ def approx_percentile_cont(
         3.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
     return Expr(
         f.approx_percentile_cont(
             sort_expr_raw, percentile, num_centroids=num_centroids, filter=filter_raw
@@ -5054,11 +4914,11 @@ def approx_percentile_cont(
 
 
 def approx_percentile_cont_with_weight(
-    sort_expression: Expr | SortExpr,
-    weight: Expr,
+    sort_expression: Expr | str | SortExpr,
+    weight: Expr | str,
     percentile: float,
     num_centroids: int | None = None,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Returns the value of the weighted approximate percentile.
 
@@ -5080,14 +4940,14 @@ def approx_percentile_cont_with_weight(
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0], "w": [1.0, 1.0, 1.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_percentile_cont_with_weight(
-        ...         dfn.col("a"), dfn.col("w"), 0.5
+        ...         "a", "w", 0.5
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.approx_percentile_cont_with_weight(
-        ...         dfn.col("a"), dfn.col("w"), 0.5,
+        ...         "a", "w", 0.5,
         ...         num_centroids=10,
         ...         filter=dfn.col("a") > dfn.lit(1.0),
         ...     ).alias("v")])
@@ -5095,11 +4955,11 @@ def approx_percentile_cont_with_weight(
         2.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
     return Expr(
         f.approx_percentile_cont_with_weight(
             sort_expr_raw,
-            weight.expr,
+            _to_raw_expr(weight),
             percentile,
             num_centroids=num_centroids,
             filter=filter_raw,
@@ -5108,9 +4968,9 @@ def approx_percentile_cont_with_weight(
 
 
 def percentile_cont(
-    sort_expression: Expr | SortExpr,
+    sort_expression: Expr | str | SortExpr,
     percentile: float,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the exact percentile of input values using continuous interpolation.
 
@@ -5130,28 +4990,28 @@ def percentile_cont(
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0, 4.0, 5.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.percentile_cont(
-        ...         dfn.col("a"), 0.5
+        ...         "a", 0.5
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.percentile_cont(
-        ...         dfn.col("a"), 0.5,
+        ...         "a", 0.5,
         ...         filter=dfn.col("a") > dfn.lit(1.0),
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3.5
     """
     sort_expr_raw = sort_or_default(sort_expression)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
     return Expr(f.percentile_cont(sort_expr_raw, percentile, filter=filter_raw))
 
 
 def quantile_cont(
-    sort_expression: Expr | SortExpr,
+    sort_expression: Expr | str | SortExpr,
     percentile: float,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the exact percentile of input values using continuous interpolation.
 
@@ -5162,9 +5022,9 @@ def quantile_cont(
 
 
 def array_agg(
-    expression: Expr,
+    expression: Expr | str,
     distinct: bool = False,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Aggregate values into an array.
@@ -5185,24 +5045,21 @@ def array_agg(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.array_agg(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.array_agg("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         [1, 2, 3]
 
         >>> df = ctx.from_pydict({"a": [3, 1, 2, 1]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.array_agg(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...     ).alias("v")])
         >>> sorted(result.collect_column("v")[0].as_py())
         [1, 2, 3]
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.array_agg(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1),
         ...         order_by="a",
         ...     ).alias("v")])
@@ -5210,19 +5067,22 @@ def array_agg(
         [2, 3]
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     return Expr(
         f.array_agg(
-            expression.expr, distinct=distinct, filter=filter_raw, order_by=order_by_raw
+            _to_raw_expr(expression),
+            distinct=distinct,
+            filter=filter_raw,
+            order_by=order_by_raw,
         )
     )
 
 
 def grouping(
-    expression: Expr,
+    expression: Expr | str,
     distinct: bool = False,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Indicates whether a column is aggregated across in the current row.
 
@@ -5265,8 +5125,8 @@ def grouping(
         >>> df = ctx.from_pydict({"a": [1, 1, 2], "b": [10, 20, 30]})
         >>> result = df.aggregate(
         ...     [GroupingSet.rollup(dfn.col("a"))],
-        ...     [dfn.functions.sum(dfn.col("b")).alias("s"),
-        ...      dfn.functions.grouping(dfn.col("a"))],
+        ...     [dfn.functions.sum("b").alias("s"),
+        ...      dfn.functions.grouping("a")],
         ... ).sort(dfn.col("a").sort(nulls_first=False))
         >>> result.collect_column("s").to_pylist()
         [30, 30, 60]
@@ -5274,14 +5134,16 @@ def grouping(
     See Also:
         :py:class:`~datafusion.expr.GroupingSet`
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.grouping(expression.expr, distinct=distinct, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(
+        f.grouping(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+    )
 
 
 def avg(
-    expression: Expr,
+    expression: Expr | str,
     distinct: bool = False,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Returns the average value.
 
@@ -5298,16 +5160,13 @@ def avg(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.avg(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.avg("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.avg(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
@@ -5316,16 +5175,18 @@ def avg(
         >>> df = ctx.from_pydict({"a": [1.0, 1.0, 2.0, 3.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.avg(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.avg(expression.expr, distinct=distinct, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.avg(_to_raw_expr(expression), distinct=distinct, filter=filter_raw))
 
 
-def corr(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
+def corr(
+    value_y: Expr | str, value_x: Expr | str, filter: Expr | str | None = None
+) -> Expr:
     """Returns the correlation coefficient between ``value1`` and ``value2``.
 
     This aggregate function expects both values to be numeric and will return a float.
@@ -5341,29 +5202,26 @@ def corr(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0], "b": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.corr(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.corr("a", "b").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.corr(
-        ...         dfn.col("a"), dfn.col("b"),
+        ...         "a", "b",
         ...         filter=dfn.col("a") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.corr(value_y.expr, value_x.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.corr(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw))
 
 
 def count(
-    expressions: Expr | list[Expr] | None = None,
+    expressions: Expr | str | list[Expr | str] | None = None,
     distinct: bool = False,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Returns the number of rows that match the given arguments.
 
@@ -5380,35 +5238,34 @@ def count(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.count(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.count("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3
 
         >>> df = ctx.from_pydict({"a": [1, 1, 2, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.count(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...         filter=dfn.col("a") > dfn.lit(1),
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     if expressions is None:
         args = [Expr.literal(1).expr]
     elif isinstance(expressions, list):
-        args = [arg.expr for arg in expressions]
+        args = _to_raw_expr_list(expressions)
     else:
-        args = [expressions.expr]
+        args = [_to_raw_expr(expressions)]
 
     return Expr(f.count(*args, distinct=distinct, filter=filter_raw))
 
 
-def covar_pop(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
+def covar_pop(
+    value_y: Expr | str, value_x: Expr | str, filter: Expr | str | None = None
+) -> Expr:
     """Computes the population covariance.
 
     This aggregate function expects both values to be numeric and will return a float.
@@ -5424,12 +5281,7 @@ def covar_pop(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 5.0, 10.0], "b": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [],
-        ...     [dfn.functions.covar_pop(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.covar_pop("a", "b").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3.0
 
@@ -5438,18 +5290,22 @@ def covar_pop(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
         >>> result = df.aggregate(
         ...     [],
         ...     [dfn.functions.covar_pop(
-        ...         dfn.col("a"), dfn.col("b"),
+        ...         "a", "b",
         ...         filter=dfn.col("a") > dfn.lit(0.0)
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.covar_pop(value_y.expr, value_x.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(
+        f.covar_pop(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw)
+    )
 
 
-def covar_samp(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
+def covar_samp(
+    value_y: Expr | str, value_x: Expr | str, filter: Expr | str | None = None
+) -> Expr:
     """Computes the sample covariance.
 
     This aggregate function expects both values to be numeric and will return a float.
@@ -5465,26 +5321,27 @@ def covar_samp(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.covar_samp(
-        ...         dfn.col("a"), dfn.col("b")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.covar_samp("a", "b").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.covar_samp(
-        ...         dfn.col("a"), dfn.col("b"),
+        ...         "a", "b",
         ...         filter=dfn.col("a") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.covar_samp(value_y.expr, value_x.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(
+        f.covar_samp(_to_raw_expr(value_y), _to_raw_expr(value_x), filter=filter_raw)
+    )
 
 
-def covar(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
+def covar(
+    value_y: Expr | str, value_x: Expr | str, filter: Expr | str | None = None
+) -> Expr:
     """Computes the sample covariance.
 
     See Also:
@@ -5493,7 +5350,7 @@ def covar(value_y: Expr, value_x: Expr, filter: Expr | None = None) -> Expr:
     return covar_samp(value_y, value_x, filter)
 
 
-def max(expression: Expr, filter: Expr | None = None) -> Expr:
+def max(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Aggregate function that returns the maximum value of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5506,26 +5363,23 @@ def max(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.max(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.max("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.max(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") < dfn.lit(3)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.max(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.max(_to_raw_expr(expression), filter=filter_raw))
 
 
-def mean(expression: Expr, filter: Expr | None = None) -> Expr:
+def mean(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Returns the average (mean) value of the argument.
 
     See Also:
@@ -5535,7 +5389,7 @@ def mean(expression: Expr, filter: Expr | None = None) -> Expr:
 
 
 def median(
-    expression: Expr, distinct: bool = False, filter: Expr | None = None
+    expression: Expr | str, distinct: bool = False, filter: Expr | str | None = None
 ) -> Expr:
     """Computes the median of a set of numbers.
 
@@ -5553,27 +5407,26 @@ def median(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.median(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.median("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> df = ctx.from_pydict({"a": [1.0, 1.0, 2.0, 3.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.median(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...         filter=dfn.col("a") < dfn.lit(3.0),
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.median(expression.expr, distinct=distinct, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(
+        f.median(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+    )
 
 
-def min(expression: Expr, filter: Expr | None = None) -> Expr:
+def min(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Aggregate function that returns the minimum value of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5586,29 +5439,26 @@ def min(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.min(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.min("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.min(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.min(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.min(_to_raw_expr(expression), filter=filter_raw))
 
 
 def sum(
-    expression: Expr,
+    expression: Expr | str,
     distinct: bool = False,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the sum of a set of numbers.
 
@@ -5625,16 +5475,13 @@ def sum(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.sum(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.sum("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         6
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.sum(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
@@ -5643,16 +5490,16 @@ def sum(
         >>> df = ctx.from_pydict({"a": [1, 1, 2, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.sum(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         6
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.sum(expression.expr, distinct=distinct, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.sum(_to_raw_expr(expression), distinct=distinct, filter=filter_raw))
 
 
-def stddev(expression: Expr, filter: Expr | None = None) -> Expr:
+def stddev(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the standard deviation of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5665,26 +5512,23 @@ def stddev(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [2.0, 4.0, 6.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.stddev(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.stddev("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.stddev(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(2.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.41...
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.stddev(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.stddev(_to_raw_expr(expression), filter=filter_raw))
 
 
-def stddev_pop(expression: Expr, filter: Expr | None = None) -> Expr:
+def stddev_pop(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the population standard deviation of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5697,29 +5541,25 @@ def stddev_pop(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [0.0, 1.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.stddev_pop(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.stddev_pop("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.247...
 
         >>> df = ctx.from_pydict({"a": [0.0, 1.0, 3.0]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.stddev_pop(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(0.0)
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.stddev_pop(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.stddev_pop(_to_raw_expr(expression), filter=filter_raw))
 
 
-def stddev_samp(arg: Expr, filter: Expr | None = None) -> Expr:
+def stddev_samp(arg: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the sample standard deviation of the argument.
 
     See Also:
@@ -5728,7 +5568,7 @@ def stddev_samp(arg: Expr, filter: Expr | None = None) -> Expr:
     return stddev(arg, filter=filter)
 
 
-def var(expression: Expr, filter: Expr | None = None) -> Expr:
+def var(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the sample variance of the argument.
 
     See Also:
@@ -5737,7 +5577,7 @@ def var(expression: Expr, filter: Expr | None = None) -> Expr:
     return var_samp(expression, filter)
 
 
-def var_pop(expression: Expr, filter: Expr | None = None) -> Expr:
+def var_pop(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the population variance of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5750,26 +5590,23 @@ def var_pop(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [-1.0, 0.0, 2.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.var_pop(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.var_pop("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.555...
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.var_pop(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(-1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.var_pop(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.var_pop(_to_raw_expr(expression), filter=filter_raw))
 
 
-def var_population(expression: Expr, filter: Expr | None = None) -> Expr:
+def var_population(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the population variance of the argument.
 
     See Also:
@@ -5778,7 +5615,7 @@ def var_population(expression: Expr, filter: Expr | None = None) -> Expr:
     return var_pop(expression, filter)
 
 
-def var_samp(expression: Expr, filter: Expr | None = None) -> Expr:
+def var_samp(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the sample variance of the argument.
 
     If using the builder functions described in ref:`_aggregation` this function ignores
@@ -5791,26 +5628,23 @@ def var_samp(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.var_samp(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.var_samp("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.var_samp(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.var_sample(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.var_sample(_to_raw_expr(expression), filter=filter_raw))
 
 
-def var_sample(expression: Expr, filter: Expr | None = None) -> Expr:
+def var_sample(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the sample variance of the argument.
 
     See Also:
@@ -5820,9 +5654,9 @@ def var_sample(expression: Expr, filter: Expr | None = None) -> Expr:
 
 
 def regr_avgx(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the average of the independent variable ``x``.
 
@@ -5840,30 +5674,27 @@ def regr_avgx(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [4.0, 5.0, 6.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_avgx(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_avgx("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         5.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_avgx(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         5.5
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_avgx(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_avgx(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_avgy(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the average of the dependent variable ``y``.
 
@@ -5881,30 +5712,27 @@ def regr_avgy(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [4.0, 5.0, 6.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_avgy(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_avgy("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_avgy(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.5
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_avgy(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_avgy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_count(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Counts the number of rows in which both expressions are not null.
 
@@ -5922,30 +5750,27 @@ def regr_count(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [4.0, 5.0, 6.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_count(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_count("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_count(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_count(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_count(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_intercept(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the intercept from the linear regression.
 
@@ -5966,7 +5791,7 @@ def regr_intercept(
         >>> result = df.aggregate(
         ...     [],
         ...     [dfn.functions.regr_intercept(
-        ...         dfn.col("y"), dfn.col("x")
+        ...         "y", "x"
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.714...
@@ -5974,21 +5799,21 @@ def regr_intercept(
         >>> result = df.aggregate(
         ...     [],
         ...     [dfn.functions.regr_intercept(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(2.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.4
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_intercept(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_intercept(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_r2(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the R-squared value from linear regression.
 
@@ -6006,30 +5831,27 @@ def regr_r2(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [2.0, 4.0, 6.0], "x": [4.0, 16.0, 36.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_r2(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_r2("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.9795...
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_r2(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(2.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         1.0
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_r2(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_r2(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_slope(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the slope from linear regression.
 
@@ -6047,30 +5869,27 @@ def regr_slope(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [2.0, 4.0, 6.0], "x": [4.0, 16.0, 36.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_slope(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_slope("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.122...
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_slope(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(2.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.1
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_slope(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_slope(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_sxx(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the sum of squares of the independent variable ``x``.
 
@@ -6088,30 +5907,27 @@ def regr_sxx(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_sxx(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_sxx("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_sxx(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_sxx(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_sxx(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_sxy(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the sum of products of pairs of numbers.
 
@@ -6129,30 +5945,27 @@ def regr_sxy(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_sxy(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_sxy("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_sxy(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_sxy(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_sxy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def regr_syy(
-    y: Expr,
-    x: Expr,
-    filter: Expr | None = None,
+    y: Expr | str,
+    x: Expr | str,
+    filter: Expr | str | None = None,
 ) -> Expr:
     """Computes the sum of squares of the dependent variable ``y``.
 
@@ -6170,29 +5983,26 @@ def regr_syy(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"y": [1.0, 2.0, 3.0], "x": [1.0, 2.0, 3.0]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.regr_syy(
-        ...         dfn.col("y"), dfn.col("x")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.regr_syy("y", "x").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         2.0
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.regr_syy(
-        ...         dfn.col("y"), dfn.col("x"),
+        ...         "y", "x",
         ...         filter=dfn.col("y") > dfn.lit(1.0)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         0.5
     """
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
-    return Expr(f.regr_syy(y.expr, x.expr, filter=filter_raw))
+    return Expr(f.regr_syy(_to_raw_expr(y), _to_raw_expr(x), filter=filter_raw))
 
 
 def first_value(
-    expression: Expr,
-    filter: Expr | None = None,
+    expression: Expr | str,
+    filter: Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
     null_treatment: NullTreatment = NullTreatment.RESPECT_NULLS,
 ) -> Expr:
@@ -6213,18 +6023,14 @@ def first_value(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [10, 20, 30]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.first_value(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.first_value("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         10
 
         >>> df = ctx.from_pydict({"a": [None, 20, 10]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.first_value(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(10),
         ...         order_by="a",
         ...         null_treatment=dfn.common.NullTreatment.IGNORE_NULLS,
@@ -6234,11 +6040,11 @@ def first_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     return Expr(
         f.first_value(
-            expression.expr,
+            _to_raw_expr(expression),
             filter=filter_raw,
             order_by=order_by_raw,
             null_treatment=null_treatment.value,
@@ -6247,8 +6053,8 @@ def first_value(
 
 
 def last_value(
-    expression: Expr,
-    filter: Expr | None = None,
+    expression: Expr | str,
+    filter: Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
     null_treatment: NullTreatment = NullTreatment.RESPECT_NULLS,
 ) -> Expr:
@@ -6269,18 +6075,14 @@ def last_value(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [10, 20, 30]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.last_value(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.last_value("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         30
 
         >>> df = ctx.from_pydict({"a": [None, 20, 10]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.last_value(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(10),
         ...         order_by="a",
         ...         null_treatment=dfn.common.NullTreatment.IGNORE_NULLS,
@@ -6290,11 +6092,11 @@ def last_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     return Expr(
         f.last_value(
-            expression.expr,
+            _to_raw_expr(expression),
             filter=filter_raw,
             order_by=order_by_raw,
             null_treatment=null_treatment.value,
@@ -6303,9 +6105,9 @@ def last_value(
 
 
 def nth_value(
-    expression: Expr,
+    expression: Expr | str,
     n: int,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
     null_treatment: NullTreatment = NullTreatment.RESPECT_NULLS,
 ) -> Expr:
@@ -6327,17 +6129,13 @@ def nth_value(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [10, 20, 30]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.nth_value(
-        ...         dfn.col("a"), 1
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.nth_value("a", 1).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         10
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.nth_value(
-        ...         dfn.col("a"), 1,
+        ...         "a", 1,
         ...         filter=dfn.col("a") > dfn.lit(10),
         ...         order_by="a",
         ...         null_treatment=dfn.common.NullTreatment.IGNORE_NULLS,
@@ -6347,11 +6145,11 @@ def nth_value(
         20
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     return Expr(
         f.nth_value(
-            expression.expr,
+            _to_raw_expr(expression),
             n,
             filter=filter_raw,
             order_by=order_by_raw,
@@ -6360,7 +6158,7 @@ def nth_value(
     )
 
 
-def bit_and(expression: Expr, filter: Expr | None = None) -> Expr:
+def bit_and(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the bitwise AND of the argument.
 
     This aggregate function will bitwise compare every value in the input partition.
@@ -6375,27 +6173,24 @@ def bit_and(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [7, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.bit_and(
-        ...         dfn.col("a")
-        ...     ).alias("v")])
+        >>> result = df.aggregate([], [dfn.functions.bit_and("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3
 
         >>> df = ctx.from_pydict({"a": [7, 5, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.bit_and(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(3)
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.bit_and(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.bit_and(_to_raw_expr(expression), filter=filter_raw))
 
 
-def bit_or(expression: Expr, filter: Expr | None = None) -> Expr:
+def bit_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the bitwise OR of the argument.
 
     This aggregate function will bitwise compare every value in the input partition.
@@ -6410,30 +6205,26 @@ def bit_or(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [1, 2]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.bit_or(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.bit_or("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         3
 
         >>> df = ctx.from_pydict({"a": [1, 2, 4]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.bit_or(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("a") > dfn.lit(1)
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         6
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.bit_or(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.bit_or(_to_raw_expr(expression), filter=filter_raw))
 
 
 def bit_xor(
-    expression: Expr, distinct: bool = False, filter: Expr | None = None
+    expression: Expr | str, distinct: bool = False, filter: Expr | str | None = None
 ) -> Expr:
     """Computes the bitwise XOR of the argument.
 
@@ -6450,29 +6241,27 @@ def bit_xor(
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [5, 3]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.bit_xor(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.bit_xor("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         6
 
         >>> df = ctx.from_pydict({"a": [5, 5, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.bit_xor(
-        ...         dfn.col("a"), distinct=True,
+        ...         "a", distinct=True,
         ...         filter=dfn.col("a") > dfn.lit(3),
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         5
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.bit_xor(expression.expr, distinct=distinct, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(
+        f.bit_xor(_to_raw_expr(expression), distinct=distinct, filter=filter_raw)
+    )
 
 
-def bool_and(expression: Expr, filter: Expr | None = None) -> Expr:
+def bool_and(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the boolean AND of the argument.
 
     This aggregate function will compare every value in the input partition. These are
@@ -6488,11 +6277,7 @@ def bool_and(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [True, True, False]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.bool_and(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.bool_and("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         False
 
@@ -6500,18 +6285,18 @@ def bool_and(expression: Expr, filter: Expr | None = None) -> Expr:
         ...     {"a": [True, True, False], "b": [1, 2, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.bool_and(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("b") < dfn.lit(3)
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         True
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.bool_and(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.bool_and(_to_raw_expr(expression), filter=filter_raw))
 
 
-def bool_or(expression: Expr, filter: Expr | None = None) -> Expr:
+def bool_or(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     """Computes the boolean OR of the argument.
 
     This aggregate function will compare every value in the input partition. These are
@@ -6527,11 +6312,7 @@ def bool_or(expression: Expr, filter: Expr | None = None) -> Expr:
     Examples:
         >>> ctx = dfn.SessionContext()
         >>> df = ctx.from_pydict({"a": [False, False, True]})
-        >>> result = df.aggregate(
-        ...     [], [dfn.functions.bool_or(
-        ...         dfn.col("a")
-        ...     ).alias("v")]
-        ... )
+        >>> result = df.aggregate([], [dfn.functions.bool_or("a").alias("v")])
         >>> result.collect_column("v")[0].as_py()
         True
 
@@ -6539,22 +6320,22 @@ def bool_or(expression: Expr, filter: Expr | None = None) -> Expr:
         ...     {"a": [False, False, True], "b": [1, 2, 3]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.bool_or(
-        ...         dfn.col("a"),
+        ...         "a",
         ...         filter=dfn.col("b") < dfn.lit(3)
         ...     ).alias("v")]
         ... )
         >>> result.collect_column("v")[0].as_py()
         False
     """
-    filter_raw = filter.expr if filter is not None else None
-    return Expr(f.bool_or(expression.expr, filter=filter_raw))
+    filter_raw = _to_raw_expr_or_none(filter)
+    return Expr(f.bool_or(_to_raw_expr(expression), filter=filter_raw))
 
 
 def lead(
-    arg: Expr,
+    arg: Expr | str,
     shift_offset: int = 1,
     default_value: Any | None = None,
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a lead window function.
@@ -6593,7 +6374,7 @@ def lead(
         >>> result = df.select(
         ...     dfn.col("a"),
         ...     dfn.functions.lead(
-        ...         dfn.col("a"), shift_offset=1,
+        ...         "a", shift_offset=1,
         ...         default_value=0, order_by="a"
         ...     ).alias("lead"))
         >>> result.sort(dfn.col("a")).collect_column("lead").to_pylist()
@@ -6603,8 +6384,8 @@ def lead(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.lead(
-        ...         dfn.col("v"), shift_offset=1, default_value=0,
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         "v", shift_offset=1, default_value=0,
+        ...         partition_by="g", order_by="v",
         ...     ).alias("lead"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("lead").to_pylist()
         [2, 0, 0]
@@ -6617,7 +6398,7 @@ def lead(
 
     return Expr(
         f.lead(
-            arg.expr,
+            _to_raw_expr(arg),
             shift_offset,
             default_value,
             partition_by=partition_by_raw,
@@ -6627,10 +6408,10 @@ def lead(
 
 
 def lag(
-    arg: Expr,
+    arg: Expr | str,
     shift_offset: int = 1,
     default_value: Any | None = None,
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a lag window function.
@@ -6666,7 +6447,7 @@ def lag(
         >>> result = df.select(
         ...     dfn.col("a"),
         ...     dfn.functions.lag(
-        ...         dfn.col("a"), shift_offset=1,
+        ...         "a", shift_offset=1,
         ...         default_value=0, order_by="a"
         ...     ).alias("lag"))
         >>> result.sort(dfn.col("a")).collect_column("lag").to_pylist()
@@ -6676,8 +6457,8 @@ def lag(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.lag(
-        ...         dfn.col("v"), shift_offset=1, default_value=0,
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         "v", shift_offset=1, default_value=0,
+        ...         partition_by="g", order_by="v",
         ...     ).alias("lag"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("lag").to_pylist()
         [0, 1, 0]
@@ -6690,7 +6471,7 @@ def lag(
 
     return Expr(
         f.lag(
-            arg.expr,
+            _to_raw_expr(arg),
             shift_offset,
             default_value,
             partition_by=partition_by_raw,
@@ -6700,7 +6481,7 @@ def lag(
 
 
 def row_number(
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a row number window function.
@@ -6739,7 +6520,7 @@ def row_number(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.row_number(
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         partition_by="g", order_by="v",
         ...     ).alias("rn"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("rn").to_pylist()
         [1, 2, 1, 2]
@@ -6756,7 +6537,7 @@ def row_number(
 
 
 def rank(
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a rank window function.
@@ -6801,7 +6582,7 @@ def rank(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.rank(
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         partition_by="g", order_by="v",
         ...     ).alias("rnk"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("rnk").to_pylist()
         [1, 1, 1, 2]
@@ -6818,7 +6599,7 @@ def rank(
 
 
 def dense_rank(
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a dense_rank window function.
@@ -6857,7 +6638,7 @@ def dense_rank(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.dense_rank(
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         partition_by="g", order_by="v",
         ...     ).alias("dr"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("dr").to_pylist()
         [1, 1, 1, 2]
@@ -6874,7 +6655,7 @@ def dense_rank(
 
 
 def percent_rank(
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a percent_rank window function.
@@ -6915,7 +6696,7 @@ def percent_rank(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.percent_rank(
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         partition_by="g", order_by="v",
         ...     ).alias("pr"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("pr").to_pylist()
         [0.0, 0.5, 1.0, 0.0, 1.0]
@@ -6932,7 +6713,7 @@ def percent_rank(
 
 
 def cume_dist(
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a cumulative distribution window function.
@@ -6973,7 +6754,7 @@ def cume_dist(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.cume_dist(
-        ...         partition_by=dfn.col("g"), order_by="v",
+        ...         partition_by="g", order_by="v",
         ...     ).alias("cd"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("cd").to_pylist()
         [0.5, 1.0, 0.5, 1.0]
@@ -6991,7 +6772,7 @@ def cume_dist(
 
 def ntile(
     groups: int,
-    partition_by: list[Expr] | Expr | None = None,
+    partition_by: list[Expr | str] | Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Create a n-tile window function.
@@ -7034,7 +6815,7 @@ def ntile(
         >>> result = df.select(
         ...     dfn.col("g"), dfn.col("v"),
         ...     dfn.functions.ntile(
-        ...         2, partition_by=dfn.col("g"), order_by="v",
+        ...         2, partition_by="g", order_by="v",
         ...     ).alias("nt"))
         >>> result.sort(dfn.col("g"), dfn.col("v")).collect_column("nt").to_pylist()
         [1, 2, 1, 2]
@@ -7052,9 +6833,9 @@ def ntile(
 
 
 def string_agg(
-    expression: Expr,
+    expression: Expr | str,
     delimiter: str,
-    filter: Expr | None = None,
+    filter: Expr | str | None = None,
     order_by: list[SortKey] | SortKey | None = None,
 ) -> Expr:
     """Concatenates the input strings.
@@ -7078,14 +6859,14 @@ def string_agg(
         >>> df = ctx.from_pydict({"a": ["x", "y", "z"]})
         >>> result = df.aggregate(
         ...     [], [dfn.functions.string_agg(
-        ...         dfn.col("a"), ",", order_by="a"
+        ...         "a", ",", order_by="a"
         ...     ).alias("s")])
         >>> result.collect_column("s")[0].as_py()
         'x,y,z'
 
         >>> result = df.aggregate(
         ...     [], [dfn.functions.string_agg(
-        ...         dfn.col("a"), ",",
+        ...         "a", ",",
         ...         filter=dfn.col("a") > dfn.lit("x"),
         ...         order_by="a",
         ...     ).alias("s")])
@@ -7093,11 +6874,11 @@ def string_agg(
         'y,z'
     """
     order_by_raw = sort_list_to_raw_sort_list(order_by)
-    filter_raw = filter.expr if filter is not None else None
+    filter_raw = _to_raw_expr_or_none(filter)
 
     return Expr(
         f.string_agg(
-            expression.expr,
+            _to_raw_expr(expression),
             delimiter,
             filter=filter_raw,
             order_by=order_by_raw,
