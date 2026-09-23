@@ -5385,7 +5385,7 @@ def mean(expression: Expr | str, filter: Expr | str | None = None) -> Expr:
     See Also:
         This is an alias for :py:func:`avg`.
     """
-    return avg(expression, filter)
+    return avg(expression, filter=filter)
 
 
 def median(
@@ -5486,6 +5486,14 @@ def sum(
         ...     ).alias("v")])
         >>> result.collect_column("v")[0].as_py()
         5
+
+        ``filter`` also takes the name of a boolean column:
+
+        >>> flagged = ctx.from_pydict({"a": [1, 2, 3], "keep": [True, False, True]})
+        >>> result = flagged.aggregate(
+        ...     [], [dfn.functions.sum("a", filter="keep").alias("v")])
+        >>> result.collect_column("v")[0].as_py()
+        4
 
         >>> df = ctx.from_pydict({"a": [1, 1, 2, 3]})
         >>> result = df.aggregate(

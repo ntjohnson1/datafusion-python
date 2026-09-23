@@ -90,6 +90,12 @@ def avg(
         >>> r = df.aggregate([], [dfn.functions.spark.avg("a").alias("v")])
         >>> r.collect_column("v")[0].as_py()
         2.0
+
+        >>> df = ctx.from_pydict({"a": [1.0, 2.0, 3.0], "keep": [True, False, True]})
+        >>> r = df.aggregate(
+        ...     [], [dfn.functions.spark.avg("a", filter="keep").alias("v")])
+        >>> r.collect_column("v")[0].as_py()
+        2.0
     """
     return Expr(
         _f.avg(
