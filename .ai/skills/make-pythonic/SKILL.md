@@ -354,9 +354,10 @@ Both meanings coexist within one call, which is how pyspark behaves too:
 data* — `element` in `array_append`, `from_val`/`to_val` in `array_replace`,
 `key` in `map_extract`, `then` in `when`. A string there reads naturally as a
 literal but sits in a data position, so these stay `Expr`-only and the caller
-stays explicit. `VALUE_LIKE_ARGS` in `python/tests/test_functions.py` holds the
-full list; `test_data_args_accept_column_names` fails if a function grows an
-`Expr`-only argument that is not on it.
+stays explicit. To find the whole set, list the parameters whose annotation is
+exactly `Expr`, `Expr | None`, or `list[Expr]` — no other argument in either
+module is still `Expr`-only. (`Expr | Callable[..., Any]` is a lambda
+parameter, not one of these.)
 
 ## Implementation Steps
 
@@ -394,14 +395,37 @@ Per the project's CLAUDE.md rules:
 dfn.functions.left(dfn.col("a"), dfn.lit(3))
 
 # AFTER (new style - shown in examples)
-dfn.functions.left(dfn.col("a"), 3)
+dfn.functions.left("a", 3)
 ```
+
+The examples are the coverage for this behavior, so make sure each widened
+parameter appears in one. A parameter that only ever shows up wrapped in
+`col()` or `lit()` is untested: nothing else calls it with a bare string.
+Optional parameters are the easy ones to miss — an aggregate's `filter` takes
+the name of a boolean column, and `sum` carries the example for that:
+
+```python
+>>> flagged = ctx.from_pydict({"a": [1, 2, 3], "keep": [True, False, True]})
+>>> flagged.aggregate([], [dfn.functions.sum("a", filter="keep").alias("v")])
+```
+
+Aliases carry no examples of their own, so a widened parameter reachable only
+through an alias needs its example on the primary function.
 
 ### Step 5: Run Tests
 
-After making changes, run the doctests to verify:
+After making changes, run the doctests. They execute every example, so a
+signature widened without widening the body fails here rather than at a user's
+first call:
 ```bash
-python -m pytest --doctest-modules python/datafusion/functions/__init__.py -v
+python -m pytest --doctest-modules python/datafusion/functions -v
+```
+
+Then run the unit tests, which cover the boundaries the examples do not —
+column names and literals sharing one call, the arguments that stay
+`Expr`-only, and the error a non-expression argument raises:
+```bash
+python -m pytest python/tests/test_functions.py -v
 ```
 
 ## Coercion Helper Pattern
@@ -450,7 +474,7 @@ from datafusion.expr import coerce_to_expr, coerce_to_expr_or_none
 
 ## What NOT to Change
 
-- **Do not change arguments where the coercion is ambiguous.** If it is unclear whether a string should be a column name or a literal, leave it as `Expr` and let the user be explicit. Add it to `VALUE_LIKE_ARGS` in `python/tests/test_functions.py` with a note on why.
+- **Do not change arguments where the coercion is ambiguous.** If it is unclear whether a string should be a column name or a literal, leave it as `Expr` and let the user be explicit, and say in the docstring which wrapper to reach for.
 - **Do not add coercion logic to simple aliases.** If a function is just `return other_function(...)`, the primary function handles coercion. However, you **must update the alias's type hints** to match the primary function's signature so that type checkers and documentation accurately reflect what the alias accepts.
 - **Do not change the Rust bindings.** All coercion happens in the Python layer. The Rust functions continue to accept `PyExpr`.
 

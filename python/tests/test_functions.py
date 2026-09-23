@@ -2440,3 +2440,32 @@ class TestPythonicNativeTypes:
             f.split_part(column("a"), literal(","), literal(2)).alias("s")
         ).collect()
         assert result[0].column(0)[0].as_py() == "b"
+
+
+def test_column_name_and_literal_arguments_coexist(df):
+    """A data argument reads a string as a column; a scalar one as a literal."""
+    joined = df.select(f.array_to_string(f.make_array("a", "c"), "-").alias("joined"))
+    assert joined.collect_column("joined")[0].as_py() == "Hello-hello "
+
+
+def test_value_like_args_still_require_expr():
+    """``element`` is compared against the data, so it is not a column name."""
+    with pytest.raises(AttributeError):
+        f.array_append(column("a"), "urgent")
+
+
+def test_a_string_is_never_silently_a_literal(df):
+    """Every argument of ``concat`` is data, so a bare separator is a column."""
+    with pytest.raises(Exception, match="-"):
+        df.select(f.concat("a", "-", "c")).collect()
+
+
+def test_mean_forwards_its_filter(df):
+    """``mean`` aliases ``avg``, whose second parameter is ``distinct``."""
+    assert str(f.mean("b", filter="e")) == str(f.avg("b", filter="e"))
+
+
+@pytest.mark.parametrize("bad", [3, 1.5, None, object()])
+def test_non_expr_argument_rejected(bad):
+    with pytest.raises(TypeError, match="Expected Expr or column name"):
+        f.sum(bad)
